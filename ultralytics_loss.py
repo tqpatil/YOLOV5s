@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from utils.bboxes_utils import intersection_over_union
 from dataset import Training_Dataset
 import config
-from model import YOLOV5m
+from model import YOLOV5s
 
 
 class ComputeLoss:
@@ -322,7 +322,7 @@ if __name__ == "__main__":
     anchors = config.ANCHORS
     first_out = 48
 
-    model = YOLOV5m(first_out=first_out, nc=nc, anchors=anchors,
+    model = YOLOV5s(first_out=first_out, nc=nc, anchors=anchors,
                     ch=(first_out * 4, first_out * 8, first_out * 16), inference=False).to(config.DEVICE)
 
     model.load_state_dict(state_dict=torch.load("yolov5m_coco.pt"), strict=True)

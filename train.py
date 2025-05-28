@@ -3,7 +3,7 @@ import os.path
 from pathlib import Path
 import yaml
 import torch
-from model import YOLOV5m
+from model import YOLOV5s
 from loss import YOLO_LOSS
 from ultralytics_loss import ComputeLoss
 from torch.optim import Adam
@@ -55,7 +55,7 @@ def main(opt):
     first_out = config.FIRST_OUT
     scaler = torch.cuda.amp.GradScaler()
 
-    model = YOLOV5m(first_out=first_out, nc=nc, anchors=config.ANCHORS,
+    model = YOLOV5s(first_out=first_out, nc=nc, anchors=config.ANCHORS,
                     ch=(first_out * 4, first_out * 8, first_out * 16), inference=False).to(config.DEVICE)
 
     optim = Adam(model.parameters(), lr=config.LEARNING_RATE, weight_decay=config.WEIGHT_DECAY)
