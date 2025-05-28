@@ -175,37 +175,39 @@ class HEADS(nn.Module):
         return x
 
 
-class YOLOV5m(nn.Module):
-    def __init__(self, first_out, nc=80, anchors=(),
-                 ch=(), inference=False):
-        super(YOLOV5m, self).__init__()
+class YOLOV5s(nn.Module):
+    def __init__(self, first_out=32, nc=80, anchors=(), ch=(), inference=False):
+        super(YOLOV5s, self).__init__()
         self.inference = inference
+
         self.backbone = nn.ModuleList()
         self.backbone += [
-            CBL(in_channels=3, out_channels=first_out, kernel_size=6, stride=2, padding=2),
-            CBL(in_channels=first_out, out_channels=first_out*2, kernel_size=3, stride=2, padding=1),
-            C3(in_channels=first_out*2, out_channels=first_out*2, width_multiple=0.5, depth=2),
-            CBL(in_channels=first_out*2, out_channels=first_out*4, kernel_size=3, stride=2, padding=1),
-            C3(in_channels=first_out*4, out_channels=first_out*4, width_multiple=0.5, depth=4),
-            CBL(in_channels=first_out*4, out_channels=first_out*8, kernel_size=3, stride=2, padding=1),
-            C3(in_channels=first_out*8, out_channels=first_out*8, width_multiple=0.5, depth=6),
-            CBL(in_channels=first_out*8, out_channels=first_out*16, kernel_size=3, stride=2, padding=1),
-            C3(in_channels=first_out*16, out_channels=first_out*16, width_multiple=0.5, depth=2),
-            SPPF(in_channels=first_out*16, out_channels=first_out*16)
+            CBL(3, first_out, 6, 2, 2),
+            CBL(first_out, first_out*2, 3, 2, 1),
+            C3(first_out*2, first_out*2, width_multiple=0.5, depth=1),  # was 2
+            CBL(first_out*2, first_out*4, 3, 2, 1),
+            C3(first_out*4, first_out*4, width_multiple=0.5, depth=2),  # was 4
+            CBL(first_out*4, first_out*8, 3, 2, 1),
+            C3(first_out*8, first_out*8, width_multiple=0.5, depth=3),  # was 6
+            CBL(first_out*8, first_out*16, 3, 2, 1),
+            C3(first_out*16, first_out*16, width_multiple=0.5, depth=1),  # was 2
+            SPPF(first_out*16, first_out*16)
         ]
 
         self.neck = nn.ModuleList()
         self.neck += [
-            CBL(in_channels=first_out*16, out_channels=first_out*8, kernel_size=1, stride=1, padding=0),
-            C3(in_channels=first_out*16, out_channels=first_out*8, width_multiple=0.25, depth=2, backbone=False),
-            CBL(in_channels=first_out*8, out_channels=first_out*4, kernel_size=1, stride=1, padding=0),
-            C3(in_channels=first_out*8, out_channels=first_out*4, width_multiple=0.25, depth=2, backbone=False),
-            CBL(in_channels=first_out*4, out_channels=first_out*4, kernel_size=3, stride=2, padding=1),
-            C3(in_channels=first_out*8, out_channels=first_out*8, width_multiple=0.5, depth=2, backbone=False),
-            CBL(in_channels=first_out*8, out_channels=first_out*8, kernel_size=3, stride=2, padding=1),
-            C3(in_channels=first_out*16, out_channels=first_out*16, width_multiple=0.5, depth=2, backbone=False)
+            CBL(first_out*16, first_out*8, 1, 1, 0),
+            C3(first_out*16, first_out*8, width_multiple=0.25, depth=1, backbone=False),  # was 2
+            CBL(first_out*8, first_out*4, 1, 1, 0),
+            C3(first_out*8, first_out*4, width_multiple=0.25, depth=1, backbone=False),  # was 2
+            CBL(first_out*4, first_out*4, 3, 2, 1),
+            C3(first_out*8, first_out*8, width_multiple=0.5, depth=1, backbone=False),  # was 2
+            CBL(first_out*8, first_out*8, 3, 2, 1),
+            C3(first_out*16, first_out*16, width_multiple=0.5, depth=1, backbone=False)  # was 2
         ]
+
         self.head = HEADS(nc=nc, anchors=anchors, ch=ch)
+
 
     def forward(self, x):
         assert x.shape[2] % 32 == 0 and x.shape[3] % 32 == 0, "Width and Height aren't divisible by 32!"
@@ -248,7 +250,7 @@ if __name__ == "__main__":
     x = torch.rand(batch_size, 3, image_height, image_width)
     first_out = 48
 
-    model = YOLOV5m(first_out=first_out, nc=nc, anchors=anchors,
+    model = YOLOV5s(first_out=first_out, nc=nc, anchors=anchors,
                     ch=(first_out*4, first_out*8, first_out*16), inference=False)
 
     start = time.time()
