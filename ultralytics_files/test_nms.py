@@ -1,6 +1,6 @@
 import time
 from tqdm import tqdm
-from model import YOLOV5m
+from model import YOLOV5s
 from dataset import MS_COCO_2017_VALIDATION
 import config
 import torch
@@ -19,7 +19,7 @@ if __name__ == "__main__":
     anchors = config.ANCHORS
     first_out = 48
 
-    model = YOLOV5m(first_out=first_out, nc=nc, anchors=anchors,
+    model = YOLOV5s(first_out=first_out, nc=nc, anchors=anchors,
                     ch=(first_out*4, first_out*8, first_out*16), inference=False).to(config.DEVICE)
 
     dataset = MS_COCO_2017_VALIDATION(num_classes=len(config.COCO_LABELS), anchors=config.ANCHORS,

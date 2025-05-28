@@ -1,6 +1,6 @@
 from collections import OrderedDict
 import torch
-from model import YOLOV5m
+from model import YOLOV5s
 import config
 import numpy as np
 
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     first_out = 48
     S = [8, 16, 32]
 
-    model = YOLOV5m(first_out=first_out, nc=nc, anchors=anchors,
+    model = YOLOV5s(first_out=first_out, nc=nc, anchors=anchors,
                     ch=(first_out*4, first_out*8, first_out*16))
 
     pretrained_weights = torch.load("ultralytics_yolov5m.pt")
@@ -83,7 +83,7 @@ if __name__ == "__main__":
 
     torch.save(state_dict_no_heads, "../yolov5m_nh.pt")
     """
-    model = YOLOV5m(first_out=first_out, nc=80, anchors=anchors,
+    model = YOLOV5s(first_out=first_out, nc=80, anchors=anchors,
                     ch=(first_out * 4, first_out * 8, first_out * 16))
 
     model.load_state_dict(state_dict=torch.load("../yolov5m.pt"), strict=True)

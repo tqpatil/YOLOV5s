@@ -1,6 +1,6 @@
 import config
 import torch
-from model import YOLOV5m
+from model import YOLOV5s
 from loss import YOLO_LOSS
 from ultralytics_loss import ComputeLoss
 
@@ -14,7 +14,7 @@ S = [8, 16, 32]
 anchors = config.ANCHORS
 first_out = 48
 
-model = YOLOV5m(first_out=first_out, nc=nc, anchors=anchors,
+model = YOLOV5s(first_out=first_out, nc=nc, anchors=anchors,
                 ch=(first_out * 4, first_out * 8, first_out * 16), inference=False).to(config.DEVICE)
 
 #model.load_state_dict(state_dict=torch.load("yolov5m_coco.pt"), strict=True)
