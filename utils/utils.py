@@ -39,7 +39,7 @@ def save_model(model, folder_path, file_name):
 
 def export_onnx(model):
     model.eval()
-    dummy_input = torch.randn(1, 3, 640, 640)
+    dummy_input = torch.randn(1, 4, 640, 640)
     input_names = ["actual_input"]
     output_names = ["output"]
     torch.onnx.export(model,
@@ -116,7 +116,7 @@ def coco91_2_coco80(label):
         return label
 
 # Ultralytics
-def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
+def letterbox(im, new_shape=(640, 640), color=(114, 114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
     # Resize and pad image while meeting stride-multiple constraints
     shape = im.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):

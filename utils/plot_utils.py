@@ -85,7 +85,7 @@ def save_predictions(model, loader, folder, epoch, device, filename, num_images=
             cmap = plt.get_cmap("tab20b")
             class_labels = labels
             colors = [cmap(i) for i in np.linspace(0, 1, len(class_labels))]
-            im = np.array(images[0].permute(1, 2, 0).cpu())
+            im = np.array(images[0][:3].permute(1, 2, 0).cpu())
 
             # Create figure and axes
             fig, (ax1, ax2) = plt.subplots(1, 2)
@@ -149,7 +149,7 @@ def plot_image(image, boxes, labels=config.COCO):
     cmap = plt.get_cmap("tab20b")
     class_labels = labels
     colors = [cmap(i) for i in np.linspace(0, 1, len(class_labels))]
-    im = np.array(image)
+    im = np.array(image[:3].permute(1, 2, 0)) if isinstance(image, torch.Tensor) else np.array(image[..., :3])
 
     # Create figure and axes
     fig, ax = plt.subplots(1)

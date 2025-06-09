@@ -11,7 +11,7 @@ from utils.bboxes_utils import non_max_suppression
 from PIL import Image
 import random
 import config
-
+import cv2
 
 if __name__ == "__main__":
     # do not modify
@@ -37,10 +37,10 @@ if __name__ == "__main__":
     config.ROOT_DIR = "/".join((config.ROOT_DIR.split("/")[:-1] + ["flir"]))
     imgs = os.listdir(os.path.join(config.ROOT_DIR, "images", "test"))
     if random_img:
-        img = np.array(Image.open(os.path.join(config.ROOT_DIR, "images", "test", random.choice(imgs))))
+        img = np.array(cv2.imread(os.path.join(config.ROOT_DIR, "images", "test", random.choice(imgs)), cv2.IMREAD_UNCHANGED))
     else:
 
-        img = np.array(Image.open(os.path.join(config.ROOT_DIR, "images", "test", args.img)))
+        img = np.array(cv2.imread(os.path.join(config.ROOT_DIR, "images", "test", args.img), cv2.IMREAD_UNCHANGED))
 
     img = img.transpose((2, 0, 1))
     img = img[None, :]

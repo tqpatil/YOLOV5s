@@ -1,4 +1,4 @@
-import random
+import random 
 import numpy as np
 import torch
 import os
@@ -11,7 +11,7 @@ from utils.utils import resize_image
 from utils.bboxes_utils import iou_width_height, coco_to_yolo_tensors, non_max_suppression
 from utils.plot_utils import plot_image, cells_to_bboxes
 import config
-
+import cv2
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
@@ -63,10 +63,10 @@ class Training_Dataset(Dataset):
             for img_txt in os.listdir(os.path.join(self.root_directory, "labels", self.annot_folder)):
                 img = img_txt.split(".txt")[0]
                 try:
-                    w, h = imagesize.get(os.path.join(self.root_directory, "images", self.annot_folder, f"{img}.jpg"))
+                    w, h = imagesize.get(os.path.join(self.root_directory, "images", self.annot_folder, f"{img}.tiff"))
                 except FileNotFoundError:
                     continue
-                annotations.append([str(img) + ".jpg", h, w])
+                annotations.append([str(img) + ".tiff", h, w])
             self.annotations = pd.DataFrame(annotations)
             self.annotations.to_csv(os.path.join(self.root_directory, "labels", annot_file))
 
@@ -93,7 +93,8 @@ class Training_Dataset(Dataset):
             # to avoid negative values
             labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
 
-        img = np.array(Image.open(os.path.join(self.root_directory, self.fname, img_name)).convert("RGB"))
+        img = np.array(cv2.imread(os.path.join(self.root_directory, self.fname, img_name), cv2.IMREAD_UNCHANGED))
+
 
         if self.bboxes_format == "coco":
             labels[:, -1] -= 1  # 0-indexing the classes of coco labels (1-80 --> 0-79)
@@ -290,7 +291,9 @@ class Validation_Dataset(Dataset):
         tg_width = self.annotations.iloc[idx, 2] if self.rect_training else 640
         # print(f'image_name: {img_name}, idx: {idx}, tg_height: {tg_height}, tg_width: {tg_width}')
         # img_name[:-4] to remove the .jpg or .png which are coco img formats
-        label_path = os.path.join(os.path.join(self.root_directory, "labels", self.annot_folder, img_name[:-4] + ".txt"))
+        label_base = os.path.splitext(img_name)[0]
+        label_path = os.path.join(self.root_directory, "labels", self.annot_folder, label_base + ".txt")
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             labels = np.loadtxt(fname=label_path, delimiter=" ", ndmin=2)
@@ -299,7 +302,7 @@ class Validation_Dataset(Dataset):
             # to avoid negative values
             labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
 
-        img = np.array(Image.open(os.path.join(self.root_directory, self.fname, img_name)).convert("RGB"))
+        img = np.array(cv2.imread(os.path.join(self.root_directory, self.fname, img_name), cv2.IMREAD_UNCHANGED))
 
         if self.bboxes_format == "coco":
             labels[:, -1] -= 1  # 0-indexing the classes of coco labels (1-80 --> 0-79)

@@ -1,6 +1,6 @@
 # https://www.researchgate.net/figure/YOLOv5-architecture-The-YOLO-network-consists-of-three-main-parts-Backbone-Neck-and_fig5_355962110
 import time
-import torch
+import torch # CONFIRM WORKS 
 import torch.nn as nn
 from torchvision.transforms import Resize
 from torchvision.transforms import InterpolationMode
@@ -182,7 +182,7 @@ class YOLOV5s(nn.Module):
 
         self.backbone = nn.ModuleList()
         self.backbone += [
-            CBL(3, first_out, 6, 2, 2),
+            CBL(4, first_out, 6, 2, 2), # 4 channel now 
             CBL(first_out, first_out*2, 3, 2, 1),
             C3(first_out*2, first_out*2, width_multiple=0.5, depth=1),  # was 2
             CBL(first_out*2, first_out*4, 3, 2, 1),
