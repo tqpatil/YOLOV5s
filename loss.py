@@ -12,7 +12,7 @@ from utils.bboxes_utils import (
 )
 from utils.plot_utils import cells_to_bboxes, plot_image
 import config
-from model import YOLOV5m
+from model import YOLOV5s
 from dataset import Training_Dataset
 import torch.nn.functional as F
 
@@ -256,10 +256,10 @@ if __name__ == "__main__":
     anchors = config.ANCHORS
     first_out = 48
 
-    model = YOLOV5m(first_out=first_out, nc=len(config.COCO), anchors=anchors,
+    model = YOLOV5s(first_out=first_out, nc=len(config.COCO), anchors=anchors,
                     ch=(first_out*4, first_out*8, first_out*16), inference=False).to(config.DEVICE)
 
-    model.load_state_dict(state_dict=torch.load("yolov5m.pt"), strict=True)
+    model.load_state_dict(state_dict=torch.load("yolov5s.pt"), strict=True)
 
     dataset = Training_Dataset(num_classes=len(config.COCO),
                            root_directory=config.ROOT_DIR, transform=config.TRAIN_TRANSFORMS,
