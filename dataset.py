@@ -46,9 +46,8 @@ class TiledTrainingDataset(Dataset):
 
         image_files = sorted([
             f for f in os.listdir(self.img_folder)
-            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.bmp'))
+            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp'))
         ])
-
         for img_name in image_files:
             img_path = os.path.join(self.img_folder, img_name)
             img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
@@ -56,7 +55,6 @@ class TiledTrainingDataset(Dataset):
                 continue  # skip unreadable or non-4-channel images
 
             h, w, _ = img.shape
-            print(f"{img_name}: shape = {img.shape}")
             for y in range(0, h - tile_size + 1, tile_size - overlap):
                 for x in range(0, w - tile_size + 1, tile_size - overlap):
                     self.tiles_index.append((img_name, x, y))
