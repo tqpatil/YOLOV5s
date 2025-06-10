@@ -56,7 +56,7 @@ class TiledTrainingDataset(Dataset):
                 continue  # skip unreadable or non-4-channel images
 
             h, w, _ = img.shape
-
+            print(f"{img_name}: shape = {img.shape}")
             for y in range(0, h - tile_size + 1, tile_size - overlap):
                 for x in range(0, w - tile_size + 1, tile_size - overlap):
                     self.tiles_index.append((img_name, x, y))
