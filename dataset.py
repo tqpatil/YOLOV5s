@@ -16,139 +16,119 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 
-class Training_Dataset(Dataset):
-
+class TiledTrainingDataset(Dataset):
     def __init__(self,
                  root_directory=config.ROOT_DIR,
-                 transform=None,
-                 train=True,
-                 rect_training=False,
-                 default_size=640,
-                 bs=64,
-                 bboxes_format="coco",
-                 ultralytics_loss=False,
-                 ):
+                 color_transform=None,
+                 spatial_transform = None,
+                 tile_size=640,
+                 overlap=150,
+                 bboxes_format="yolo",
+                 train=True):
 
-        assert bboxes_format in ["coco", "yolo"], 'bboxes_format must be either "coco" or "yolo"'
-        self.bs = bs
-        self.batch_range = 64 if bs < 64 else 128
+        assert bboxes_format == "yolo", "Only YOLO bbox format supported for tiling"
 
-        self.bboxes_format = bboxes_format
-        self.ultralytics_loss = ultralytics_loss
         self.root_directory = root_directory
-        self.transform = transform
-        self.rect_training = rect_training
-        self.default_size = default_size
+        self.color_transform = color_transform
+        self.spatial_transform = spatial_transform
+        self.tile_size = tile_size
+        self.overlap = overlap
         self.train = train
+        self.bboxes_format = bboxes_format
 
-        if train:
-            fname = 'images/train'
-            annot_file = "annot_train.csv"
-            # class instance because it's used in the __getitem__
-            self.annot_folder = "train"
-        else:
-            fname = 'images/val'
-            annot_file = "annot_val.csv"
-            # class instance because it's used in the __getitem__
-            self.annot_folder = "val"
-
+        fname = 'images/train' if train else 'images/val'
+        annot_file = "annot_train.csv" if train else "annot_val.csv"
+        self.annot_folder = "train" if train else "val"
         self.fname = fname
 
-        try:
-            self.annotations = pd.read_csv(os.path.join(root_directory, "labels", annot_file),
-                                           header=None, index_col=0).sort_values(by=[0])
-            self.annotations = self.annotations.head((len(self.annotations)-1))  # just removes last line
-        except FileNotFoundError:
-            annotations = []
-            for img_txt in os.listdir(os.path.join(self.root_directory, "labels", self.annot_folder)):
-                img = img_txt.split(".txt")[0]
-                try:
-                    w, h = imagesize.get(os.path.join(self.root_directory, "images", self.annot_folder, f"{img}.tiff"))
-                except FileNotFoundError:
-                    continue
-                annotations.append([str(img) + ".tiff", h, w])
-            self.annotations = pd.DataFrame(annotations)
-            self.annotations.to_csv(os.path.join(self.root_directory, "labels", annot_file))
+        self.annotations = pd.read_csv(os.path.join(root_directory, "labels", annot_file),
+                                       header=None, index_col=0).sort_values(by=[0])
+        self.annotations = self.annotations.head(len(self.annotations) - 1)
 
-        self.len_ann = len(self.annotations)
-        if rect_training:
-            self.annotations = self.adaptive_shape(self.annotations)
+        # List of (image_name, tile_x, tile_y)
+        self.tiles_index = []
+        for i in range(len(self.annotations)):
+            img_name = self.annotations.iloc[i, 0]
+            img_w, img_h = self.annotations.iloc[i, 2], self.annotations.iloc[i, 1]
+
+            for y in range(0, img_h - tile_size + 1, tile_size - overlap):
+                for x in range(0, img_w - tile_size + 1, tile_size - overlap):
+                    self.tiles_index.append((img_name, x, y))
 
     def __len__(self):
-        return len(self.annotations)
+        return len(self.tiles_index)
 
     def __getitem__(self, idx):
-
-        img_name = self.annotations.iloc[idx, 0]
-        tg_height = self.annotations.iloc[idx, 1] if self.rect_training else 640
-        tg_width = self.annotations.iloc[idx, 2] if self.rect_training else 640
-        # img_name[:-4] to remove the .jpg or .png which are coco img formats
+        img_name, x_off, y_off = self.tiles_index[idx]
+        img_path = os.path.join(self.root_directory, self.fname, img_name)
         label_path = os.path.join(self.root_directory, "labels", self.annot_folder, img_name[:-4] + ".txt")
-        # to avoid an annoying "UserWarning: loadtxt: Empty input file"
+
+        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)  # shape: (H, W, 4)
+        assert img is not None, f"Image not found: {img_path}"
+        h, w, c = img.shape
+        assert c == 4, "Expected 4-channel images"
+
+        tile = img[y_off:y_off + self.tile_size, x_off:x_off + self.tile_size]
+        tile = np.ascontiguousarray(tile)
+
+        # Load and filter labels
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            labels = np.loadtxt(fname=label_path, delimiter=" ", ndmin=2)
-            # removing annotations with negative values
-            labels = labels[np.all(labels >= 0, axis=1), :]
-            # to avoid negative values
+            labels = np.loadtxt(label_path, delimiter=" ", ndmin=2)
+            labels = labels[np.all(labels >= 0, axis=1)]
             labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
 
-        img = np.array(cv2.imread(os.path.join(self.root_directory, self.fname, img_name), cv2.IMREAD_UNCHANGED))
+        # Convert normalized YOLO bboxes to absolute xywh
+        abs_labels = []
+        for label in labels:
+            class_id, x_c, y_c, w_box, h_box = label
+            x1 = (x_c - w_box / 2) * w
+            y1 = (y_c - h_box / 2) * h
+            x2 = (x_c + w_box / 2) * w
+            y2 = (y_c + h_box / 2) * h
+
+            # Check if box intersects tile
+            if x2 < x_off or x1 > x_off + self.tile_size:
+                continue
+            if y2 < y_off or y1 > y_off + self.tile_size:
+                continue
+
+            # Clip and translate box to tile coordinates
+            x1_tile = np.clip(x1 - x_off, 0, self.tile_size)
+            y1_tile = np.clip(y1 - y_off, 0, self.tile_size)
+            x2_tile = np.clip(x2 - x_off, 0, self.tile_size)
+            y2_tile = np.clip(y2 - y_off, 0, self.tile_size)
+
+            # Convert back to YOLO
+            box_w = x2_tile - x1_tile
+            box_h = y2_tile - y1_tile
+            box_x = x1_tile + box_w / 2
+            box_y = y1_tile + box_h / 2
+
+            abs_labels.append([class_id, box_x / self.tile_size, box_y / self.tile_size, box_w / self.tile_size, box_h / self.tile_size])
+
+        labels = np.array(abs_labels)
+        if self.spatial_transform:
+            aug = self.spatial_transform(image = tile, bboxes = labels)
+            tile = aug["image"]
+            labels = np.array(aug["bboxes"])
+        # Transform only first 3 channels (RGB)
+        rgb = tile[:, :, :3]
+        alpha = tile[:, :, 3:]
+
+        if self.color_transform:
+            aug = self.color_transform(image=rgb, bboxes=labels)
+            rgb = aug["image"]
+            labels = np.array(aug["bboxes"])
+
+        # Reattach alpha if needed
+        tile = np.concatenate([rgb, alpha], axis=2) if alpha.shape[2] == 1 else rgb
+        tile = tile.transpose((2, 0, 1))  # CHW
+        tile = np.ascontiguousarray(tile)
+
+        return torch.from_numpy(tile), torch.from_numpy(labels) if len(labels) else torch.zeros((0, 5))
 
 
-        if self.bboxes_format == "coco":
-            labels[:, -1] -= 1  # 0-indexing the classes of coco labels (1-80 --> 0-79)
-            labels = np.roll(labels, axis=1, shift=1)
-            # normalized coordinates are scale invariant, hence after resizing the img we don't resize labels
-            labels[:, 1:] = coco_to_yolo_tensors(labels[:, 1:], w0=img.shape[1], h0=img.shape[0])
-
-        img = resize_image(img, (int(tg_width), int(tg_height)))
-
-        if self.transform:
-            # albumentations requires bboxes to be (x,y,w,h,class_idx)
-            batch_n = idx // self.bs
-            if batch_n % 2 == 0:
-                self.transform[1].p = 1
-            else:
-                self.transform[1].p = 0
-
-            augmentations = self.transform(image=img,
-                                           bboxes=np.roll(labels, axis=1, shift=4)
-                                           )
-            img = augmentations["image"]
-            # loss fx requires bboxes to be (class_idx,x,y,w,h)
-            labels = np.array(augmentations["bboxes"])
-            if len(labels):
-                labels = np.roll(labels, axis=1, shift=1)
-
-        """if len(labels):
-            plot_labes = xywhn2xyxy(labels[:, 1:], w=img.shape[1], h=img.shape[0])
-            fig, ax = plt.subplots(1)
-            ax.imshow(img)
-            for box in plot_labes:
-                rect = Rectangle(
-                    (box[0], box[1]),
-                    box[2] - box[0],
-                    box[3] - box[1],
-                    linewidth=2,
-                    edgecolor="green",
-                    facecolor="none"
-                )
-                # Add the patch to the Axes
-                ax.add_patch(rect)
-
-            plt.show()"""
-
-        if self.ultralytics_loss:
-            labels = torch.from_numpy(labels)
-            out_bboxes = torch.zeros((labels.shape[0], 6))
-            if len(labels):
-                out_bboxes[..., 1:] = labels
-
-        img = img.transpose((2, 0, 1))
-        img = np.ascontiguousarray(img)
-
-        return torch.from_numpy(img), out_bboxes if self.ultralytics_loss else labels
 
     # this method modifies the target width and height of
     # the images by reshaping them so that the largest size of
@@ -204,10 +184,20 @@ class Training_Dataset(Dataset):
 
     @staticmethod
     def collate_fn_ultra(batch):
-        im, label = zip(*batch)  # transposed
-        for i, lb in enumerate(label):
-            lb[:, 0] = i  # add target image index for build_targets()
-        return torch.stack(im, 0), torch.cat(label, 0)
+        images, labels = zip(*batch)  # List[Tensor], List[Tensor]
+        batch_size = len(images)
+
+        targets = []
+        for i, label in enumerate(labels):
+            if label.numel() == 0:
+                continue
+            label = label.clone()
+            img_idx_col = torch.full((label.shape[0], 1), i)
+            label = torch.cat([img_idx_col, label], dim=1)  # shape: (N, 6) -> [img_idx, class, x, y, w, h]
+            targets.append(label)
+
+        return torch.stack(images, 0), torch.cat(targets, 0) if targets else torch.zeros((0, 6))
+
 
 
 class Validation_Dataset(Dataset):
@@ -287,139 +277,107 @@ class Validation_Dataset(Dataset):
 
         img_name = self.annotations.iloc[idx, 0]
 
-        tg_height = self.annotations.iloc[idx, 1] if self.rect_training else 640
-        tg_width = self.annotations.iloc[idx, 2] if self.rect_training else 640
-        # print(f'image_name: {img_name}, idx: {idx}, tg_height: {tg_height}, tg_width: {tg_width}')
-        # img_name[:-4] to remove the .jpg or .png which are coco img formats
+        tile_size = 640
+        overlap = 150
+        stride = tile_size - overlap
+
+        tiles = []
+        targets_per_tile = []
+
+        # Load full image and labels
+        img_path = os.path.join(self.root_directory, self.fname, img_name)
+        img = np.array(cv2.imread(img_path, cv2.IMREAD_UNCHANGED))
+        H, W = img.shape[:2]
+
         label_base = os.path.splitext(img_name)[0]
         label_path = os.path.join(self.root_directory, "labels", self.annot_folder, label_base + ".txt")
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            labels = np.loadtxt(fname=label_path, delimiter=" ", ndmin=2)
-            # removing annotations with negative values
-            labels = labels[np.all(labels >= 0, axis=1), :]
-            # to avoid negative values
-            labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
-
-        img = np.array(cv2.imread(os.path.join(self.root_directory, self.fname, img_name), cv2.IMREAD_UNCHANGED))
+        labels = np.loadtxt(fname=label_path, delimiter=" ", ndmin=2)
+        labels = labels[np.all(labels >= 0, axis=1), :]
+        labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
 
         if self.bboxes_format == "coco":
-            labels[:, -1] -= 1  # 0-indexing the classes of coco labels (1-80 --> 0-79)
+            labels[:, -1] -= 1
             labels = np.roll(labels, axis=1, shift=1)
-            # normalized coordinates are scale invariant, hence after resizing the img we don't resize labels
-            labels[:, 1:] = coco_to_yolo_tensors(labels[:, 1:], w0=img.shape[1], h0=img.shape[0])
+            labels[:, 1:] = coco_to_yolo_tensors(labels[:, 1:], w0=W, h0=H)
 
-        img = resize_image(img, (int(tg_width), int(tg_height)))
+        # Convert YOLO (x_center, y_center, w, h) to pixel units
+        abs_boxes = []
+        for label in labels:
+            cls, xc, yc, bw, bh = label
+            x1 = (xc - bw / 2) * W
+            y1 = (yc - bh / 2) * H
+            x2 = (xc + bw / 2) * W
+            y2 = (yc + bh / 2) * H
+            abs_boxes.append([x1, y1, x2, y2, cls])
+        abs_boxes = np.array(abs_boxes)
 
-        if self.transform:
-            # albumentations requires bboxes to be (x,y,w,h,class_idx)
-            batch_n = idx // self.bs
-            if batch_n % 2 == 0:
-                self.transform[2].p = 1
-            else:
-                self.transform[2].p = 0
+        # Tile the image
+        for y0 in range(0, H - tile_size + 1, stride):
+            for x0 in range(0, W - tile_size + 1, stride):
+                tile = img[y0:y0 + tile_size, x0:x0 + tile_size]
+                tile_boxes = []
 
-            augmentations = self.transform(image=img,
-                                           bboxes=np.roll(labels, axis=1, shift=4)
-                                               )
+                for x1, y1, x2, y2, cls in abs_boxes:
+                    # Calculate overlap between tile and bbox
+                    inter_x1 = max(x1, x0)
+                    inter_y1 = max(y1, y0)
+                    inter_x2 = min(x2, x0 + tile_size)
+                    inter_y2 = min(y2, y0 + tile_size)
 
-            img = augmentations["image"]
-            # loss fx requires bboxes to be (class_idx,x,y,w,h)
-            labels = np.array(augmentations["bboxes"])
-            if len(labels):
-                labels = np.roll(labels, axis=1, shift=1)
+                    if inter_x1 < inter_x2 and inter_y1 < inter_y2:
+                        # Adjust to local tile coords
+                        local_xc = ((inter_x1 + inter_x2) / 2 - x0) / tile_size
+                        local_yc = ((inter_y1 + inter_y2) / 2 - y0) / tile_size
+                        local_w = (inter_x2 - inter_x1) / tile_size
+                        local_h = (inter_y2 - inter_y1) / tile_size
+                        tile_boxes.append([cls, local_xc, local_yc, local_w, local_h])
 
-        classes = labels[:, 0].tolist() if len(labels) else []
-        bboxes = labels[:, 1:] if len(labels) else []
+                tile_boxes = np.array(tile_boxes)
 
-        # Below assumes 3 scale predictions (as paper) and same num of anchors per scale
-        # 6 because (p_o, x, y, w, h, class)
-        # targets is a list of len 3 and targets[0] has shape (3, 13, 13 ,6)
-        # ?where is batch_size?
-        targets = [torch.zeros((self.num_anchors // 3, int(img.shape[0]/S),
-                                int(img.shape[1]/S), 6))
-                   for S in self.S]
+                if self.transform:
+                    augmentations = self.transform(image=tile,
+                                                bboxes=np.roll(tile_boxes, shift=4, axis=1) if len(tile_boxes) else [])
+                    tile = augmentations["image"]
+                    tile_boxes = np.array(augmentations["bboxes"])
+                    if len(tile_boxes):
+                        tile_boxes = np.roll(tile_boxes, shift=1, axis=1)
 
-        for idx, box in enumerate(bboxes):
+                tile = tile.transpose((2, 0, 1))
+                tile = np.ascontiguousarray(tile)
 
-            # this iou() computer iou just by comparing widths and heights
-            # torch.tensor(box[2:4] -> shape (2,) - self.anchors shape -> (9,2)
-            # iou_anchors --> tensor of shape (9,)
-            iou_anchors = iou_width_height(torch.from_numpy(box[2:4]), self.anchors)
-            # sorting anchors from the one with best iou with gt_box
-            anchor_indices = iou_anchors.argsort(descending=True, dim=0)
-            x, y, width, height, = box
+                # Generate YOLO targets for this tile
+                classes = tile_boxes[:, 0].tolist() if len(tile_boxes) else []
+                bboxes = tile_boxes[:, 1:] if len(tile_boxes) else []
+                targets = [torch.zeros((self.num_anchors // 3, tile_size // S, tile_size // S, 6))
+                        for S in self.S]
 
-            has_anchor = [False] * 3
+                for idx, box in enumerate(bboxes):
+                    iou_anchors = iou_width_height(torch.from_numpy(box[2:4]), self.anchors)
+                    anchor_indices = iou_anchors.argsort(descending=True)
+                    x, y, width, height = box
+                    has_anchor = [False] * 3
 
-            for anchor_idx in anchor_indices:
-                # i.e. if the best anchor idx is 8, num_anchors_per_scale
-                # we know that 8//3 = 2 --> the best scale_idx is 2 -->
-                # best_anchor belongs to last scale (52,52)
-                # scale_idx will be used to slice the variable "targets"
-                # another pov: scale_idx searches the best scale of anchors
-                scale_idx = torch.div(anchor_idx, self.num_anchors_per_scale, rounding_mode="floor")
-                # print(scale_idx)
-                # anchor_on_scale searches the idx of the best anchor in a given scale
-                # found via index in the line below
-                anchor_on_scale = anchor_idx % self.num_anchors_per_scale
-                # slice anchors based on the idx of the best scales of anchors
+                    for anchor_idx in anchor_indices:
+                        scale_idx = torch.div(anchor_idx, self.num_anchors_per_scale, rounding_mode="floor")
+                        anchor_on_scale = anchor_idx % self.num_anchors_per_scale
+                        scale_y = targets[scale_idx].shape[1]
+                        scale_x = targets[scale_idx].shape[2]
+                        i, j = int(scale_y * y), int(scale_x * x)
 
-                scale_y = targets[scale_idx].shape[1]
-                scale_x = targets[scale_idx].shape[2]
-                # S = self.S[scale_idx]
-                # scale_y = int(img.shape[1]/S)
-                # scale_x = int(img.shape[2]/S)
+                        if targets[scale_idx][anchor_on_scale, i, j, 4] == 0 and not has_anchor[scale_idx]:
+                            x_cell, y_cell = scale_x * x - j, scale_y * y - i
+                            width_cell, height_cell = width * scale_x, height * scale_y
+                            targets[scale_idx][anchor_on_scale, i, j, 0:4] = torch.tensor([x_cell, y_cell, width_cell, height_cell])
+                            targets[scale_idx][anchor_on_scale, i, j, 4] = 1
+                            targets[scale_idx][anchor_on_scale, i, j, 5] = int(classes[idx])
+                            has_anchor[scale_idx] = True
+                        elif targets[scale_idx][anchor_on_scale, i, j, 4] == 0 and iou_anchors[anchor_idx] > self.ignore_iou_thresh:
+                            targets[scale_idx][anchor_on_scale, i, j, 4] = -1
 
-                # another problem: in the labels the coordinates of the objects are set
-                # with respect to the whole image, while we need them wrt the corresponding (?) cell
-                # next line idk how --> i tells which y cell, j which x cell
-                # i.e x = 0.5, S = 13 --> int(S * x) = 6 --> 6th cell
-                i, j = int(scale_y * y), int(scale_x * x)  # which cell
-                # targets[scale_idx] --> shape (3, 13, 13, 6) best group of anchors
-                # targets[scale_idx][anchor_on_scale] --> shape (13,13,6)
-                # i and j are needed to slice to the right cell
-                # 0 is the idx corresponding to p_o
-                # I guess [anchor_on_scale, i, j, 0] equals to [anchor_on_scale][i][j][0]
-                # check that the anchor hasn't been already taken by another object (rare)
-                anchor_taken = targets[scale_idx][anchor_on_scale, i, j, 4]
-                # if not anchor_taken == if anchor_taken is still == 0 cause in the following
-                # lines will be set to one
-                # if not has_anchor[scale_idx] --> if this scale has not been already taken
-                # by another anchor which were ordered in descending order by iou, hence
-                # the previous ones are better
-                if not anchor_taken and not has_anchor[scale_idx]:
-                    # here below we are going to populate all the
-                    # 6 elements of targets[scale_idx][anchor_on_scale, i, j]
-                    # setting p_o of the chosen cell = 1 since there is an object there
-                    targets[scale_idx][anchor_on_scale, i, j, 4] = 1
-                    # setting the values of the coordinates x, y
-                    # i.e (6.5 - 6) = 0.5 --> x_coord is in the middle of this particular cell
-                    # both are between [0,1]
-                    x_cell, y_cell = scale_x * x - j, scale_y * y - i  # both between [0,1]
-                    # width = 0.5 would be 0.5 of the entire image
-                    # and as for x_cell we need the measure w.r.t the cell
-                    # i.e S=13, width = 0.5 --> 6.5
-                    width_cell, height_cell = (
-                        width * scale_x,
-                        height * scale_y,
-                    )  # can be greater than 1 since it's relative to cell
-                    box_coordinates = torch.tensor(
-                        [x_cell, y_cell, width_cell, height_cell]
-                    )
-                    targets[scale_idx][anchor_on_scale, i, j, 0:4] = box_coordinates
-                    targets[scale_idx][anchor_on_scale, i, j, 5] = int(classes[idx])
-                    has_anchor[scale_idx] = True
-                # not understood
+                tiles.append(torch.from_numpy(tile))
+                targets_per_tile.append(tuple(targets))
 
-                elif not anchor_taken and iou_anchors[anchor_idx] > self.ignore_iou_thresh:
-                    targets[scale_idx][anchor_on_scale, i, j, 4] = -1  # ignore prediction
-
-        img = img.transpose((2, 0, 1))
-        img = np.ascontiguousarray(img)
-
-        return torch.from_numpy(img), tuple(targets)
+        return tiles, targets_per_tile
 
     # this method modifies the target width and height of
     # the images by reshaping them so that the largest size of

@@ -36,16 +36,22 @@ ANCHORS = [
     [(116, 90), (156, 198), (373, 326)]  # P5/32#
 ]
 
-TRAIN_TRANSFORMS = A.Compose(
+COLOR_TRANSFORMS = A.Compose(
     [
-        A.Transpose(p=1),
-        A.HorizontalFlip(p=0.5),
-        A.VerticalFlip(p=0.5),
-        A.Rotate(limit=(-20, 20), p=0.7),
         A.Blur(p=0.05),
+        A.RandomBrightnessContrast(p=0.5),
+        A.HueSaturationValue(p=0.3),
+        A.CLAHE(p=0.3),
+        A.RandomGamma(p=0.3),
     ],
-    bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[]),
+    bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),
 )
+SPATIAL_TRANSFORMS = A.Compose([
+    A.Transpose(p=1),
+    A.HorizontalFlip(p=0.5),
+    A.VerticalFlip(p=0.5),
+    A.Rotate(limit=(-20, 20), p=0.7),
+], bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),)
 
 
 FLIR = [
