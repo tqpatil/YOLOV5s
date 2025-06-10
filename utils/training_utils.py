@@ -69,6 +69,8 @@ def get_loaders(
         val_ds,
         batch_size=batch_size,
         num_workers=num_workers,
+        pin_memory=pin_memory,
+        shuffle=False,
         collate_fn=None,
     )
 

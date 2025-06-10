@@ -13,7 +13,6 @@ from utils.plot_utils import plot_image, cells_to_bboxes
 import config
 import cv2
 import matplotlib.pyplot as plt
-
 from matplotlib.patches import Rectangle
 
 
@@ -27,60 +26,58 @@ class TiledTrainingDataset(Dataset):
                  bboxes_format="yolo",
                  train=True,
                  bs=64,
-                 shuffle=True,
                  ultralytics_loss=True):
 
-        assert bboxes_format == "yolo", "Only YOLO bbox format supported"
+        assert bboxes_format == "yolo", "Only YOLO bbox format supported for tiling"
+
         self.root_directory = root_directory
         self.color_transform = color_transform
         self.spatial_transform = spatial_transform
         self.tile_size = tile_size
         self.overlap = overlap
         self.train = train
-        self.shuffle = shuffle
-        self.bs = bs
+        self.bboxes_format = bboxes_format
 
-        self.fname = "images/train" if train else "images/val"
         self.annot_folder = "train" if train else "val"
-        self.ultralytics_loss = ultralytics_loss
+        self.img_folder = os.path.join(root_directory, "images", self.annot_folder)
+        self.label_folder = os.path.join(root_directory, "labels", self.annot_folder)
 
         self.tiles_index = []
 
-        image_dir = os.path.join(root_directory, self.fname)
-        image_files = sorted([f for f in os.listdir(image_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".tif"))])
+        image_files = sorted([
+            f for f in os.listdir(self.img_folder)
+            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.bmp'))
+        ])
 
         for img_name in image_files:
-            img_path = os.path.join(image_dir, img_name)
+            img_path = os.path.join(self.img_folder, img_name)
             img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
-            if img is None:
-                continue
-            h, w, c = img.shape
-            assert c == 4, f"{img_name} does not have 4 channels."
+            if img is None or img.ndim != 3 or img.shape[2] != 4:
+                continue  # skip unreadable or non-4-channel images
+
+            h, w, _ = img.shape
 
             for y in range(0, h - tile_size + 1, tile_size - overlap):
                 for x in range(0, w - tile_size + 1, tile_size - overlap):
                     self.tiles_index.append((img_name, x, y))
-
-        if self.shuffle:
-            random.shuffle(self.tiles_index)
 
     def __len__(self):
         return len(self.tiles_index)
 
     def __getitem__(self, idx):
         img_name, x_off, y_off = self.tiles_index[idx]
-        img_path = os.path.join(self.root_directory, self.fname, img_name)
-        label_path = os.path.join(self.root_directory, "labels", self.annot_folder, img_name[:-4] + ".txt")
+        img_path = os.path.join(self.img_folder, img_name)
+        label_path = os.path.join(self.label_folder, img_name.rsplit(".", 1)[0] + ".txt")
 
         img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         assert img is not None, f"Image not found: {img_path}"
         h, w, c = img.shape
-        assert c == 4, f"Expected 4-channel image, got {c}"
+        assert c == 4, "Expected 4-channel images"
 
         tile = img[y_off:y_off + self.tile_size, x_off:x_off + self.tile_size]
         tile = np.ascontiguousarray(tile)
 
-        abs_labels = []
+        labels = []
         if os.path.exists(label_path):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -88,35 +85,30 @@ class TiledTrainingDataset(Dataset):
                 labels = labels[np.all(labels >= 0, axis=1)]
                 labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
 
-            for label in labels:
-                class_id, x_c, y_c, w_box, h_box = label
-                x1 = (x_c - w_box / 2) * w
-                y1 = (y_c - h_box / 2) * h
-                x2 = (x_c + w_box / 2) * w
-                y2 = (y_c + h_box / 2) * h
+        abs_labels = []
+        for label in labels:
+            class_id, x_c, y_c, w_box, h_box = label
+            x1 = (x_c - w_box / 2) * w
+            y1 = (y_c - h_box / 2) * h
+            x2 = (x_c + w_box / 2) * w
+            y2 = (y_c + h_box / 2) * h
 
-                if x2 < x_off or x1 > x_off + self.tile_size:
-                    continue
-                if y2 < y_off or y1 > y_off + self.tile_size:
-                    continue
+            if x2 < x_off or x1 > x_off + self.tile_size:
+                continue
+            if y2 < y_off or y1 > y_off + self.tile_size:
+                continue
 
-                x1_tile = np.clip(x1 - x_off, 0, self.tile_size)
-                y1_tile = np.clip(y1 - y_off, 0, self.tile_size)
-                x2_tile = np.clip(x2 - x_off, 0, self.tile_size)
-                y2_tile = np.clip(y2 - y_off, 0, self.tile_size)
+            x1_tile = np.clip(x1 - x_off, 0, self.tile_size)
+            y1_tile = np.clip(y1 - y_off, 0, self.tile_size)
+            x2_tile = np.clip(x2 - x_off, 0, self.tile_size)
+            y2_tile = np.clip(y2 - y_off, 0, self.tile_size)
 
-                box_w = x2_tile - x1_tile
-                box_h = y2_tile - y1_tile
-                box_x = x1_tile + box_w / 2
-                box_y = y1_tile + box_h / 2
+            box_w = x2_tile - x1_tile
+            box_h = y2_tile - y1_tile
+            box_x = x1_tile + box_w / 2
+            box_y = y1_tile + box_h / 2
 
-                abs_labels.append([
-                    class_id,
-                    box_x / self.tile_size,
-                    box_y / self.tile_size,
-                    box_w / self.tile_size,
-                    box_h / self.tile_size
-                ])
+            abs_labels.append([class_id, box_x / self.tile_size, box_y / self.tile_size, box_w / self.tile_size, box_h / self.tile_size])
 
         labels = np.array(abs_labels)
         if self.spatial_transform:
@@ -137,6 +129,7 @@ class TiledTrainingDataset(Dataset):
         tile = np.ascontiguousarray(tile)
 
         return torch.from_numpy(tile), torch.from_numpy(labels) if len(labels) else torch.zeros((0, 5))
+
 
 
     # this method modifies the target width and height of
