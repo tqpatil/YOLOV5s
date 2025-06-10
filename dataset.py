@@ -82,8 +82,9 @@ class TiledTrainingDataset(Dataset):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 labels = np.loadtxt(label_path, delimiter=" ", ndmin=2)
-                labels = labels[np.all(labels >= 0, axis=1)]
-                labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
+                if labels.size > 0:
+                    labels = labels[np.all(labels >= 0, axis=1)]
+                    labels = np.atleast_2d(labels)
 
         abs_labels = []
         for label in labels:
@@ -93,20 +94,24 @@ class TiledTrainingDataset(Dataset):
             x2 = (x_c + w_box / 2) * w
             y2 = (y_c + h_box / 2) * h
 
-            if x2 < x_off or x1 > x_off + self.tile_size:
-                continue
-            if y2 < y_off or y1 > y_off + self.tile_size:
+            # Check if bbox intersects the tile
+            if x2 <= x_off or x1 >= x_off + self.tile_size or y2 <= y_off or y1 >= y_off + self.tile_size:
                 continue
 
+            # Clip bbox to tile
             x1_tile = np.clip(x1 - x_off, 0, self.tile_size)
             y1_tile = np.clip(y1 - y_off, 0, self.tile_size)
             x2_tile = np.clip(x2 - x_off, 0, self.tile_size)
             y2_tile = np.clip(y2 - y_off, 0, self.tile_size)
 
+            # Convert to YOLO relative coords
             box_w = x2_tile - x1_tile
             box_h = y2_tile - y1_tile
             box_x = x1_tile + box_w / 2
             box_y = y1_tile + box_h / 2
+
+            if box_w <= 0 or box_h <= 0:
+                continue
 
             abs_labels.append([class_id, box_x / self.tile_size, box_y / self.tile_size, box_w / self.tile_size, box_h / self.tile_size])
 
@@ -128,8 +133,9 @@ class TiledTrainingDataset(Dataset):
         tile = tile.transpose((2, 0, 1))
         tile = np.ascontiguousarray(tile)
 
-        return torch.from_numpy(tile), torch.from_numpy(labels) if len(labels) else torch.zeros((0, 5))
+        labels_tensor = torch.from_numpy(labels) if len(labels) else torch.zeros((0, 5), dtype=torch.float32)
 
+        return torch.from_numpy(tile), labels_tensor
 
 
     # this method modifies the target width and height of
@@ -239,45 +245,33 @@ class Validation_Dataset(Dataset):
         self.default_size = default_size
         self.root_directory = root_directory
         self.train = train
-        if train:
-            fname = 'images/train'
-            annot_file = "annot_train.csv"
-            # class instance because it's used in the __getitem__
-            self.annot_folder = "train"
-        else:
-            fname = 'images/val'
-            annot_file = "annot_val.csv"
-            # class instance because it's used in the __getitem__
-            self.annot_folder = "val"
+        self.annot_folder = "train" if train else "val"
+        self.fname = f'images/{self.annot_folder}'
+        image_folder = os.path.join(self.root_directory, self.fname)
+        label_folder = os.path.join(self.root_directory, "labels", self.annot_folder)
 
-        self.fname = fname
-
-        try:
-            self.annotations = pd.read_csv(os.path.join(root_directory, "labels", annot_file),
-                                           header=None, index_col=0).sort_values(by=[0])
-            self.annotations = self.annotations.head((len(self.annotations)-1))  # just removes last line
-        except FileNotFoundError:
-            annotations = []
-            for img_txt in os.listdir(os.path.join(self.root_directory, "labels", self.annot_folder)):
-                img = img_txt.split(".txt")[0]
-                try:
-                    w, h = imagesize.get(os.path.join(self.root_directory, "images", self.annot_folder, f"{img}.jpg"))
-                except FileNotFoundError:
-                    continue
-                annotations.append([str(img) + ".jpg", h, w])
-            self.annotations = pd.DataFrame(annotations)
-            self.annotations.to_csv(os.path.join(self.root_directory, "labels", annot_file))
+        # Collect image files that have matching .txt label files
+        self.annotations = []
+        for img_name in sorted(os.listdir(image_folder)):
+            if not img_name.lower().endswith((".jpg", ".png", ".jpeg", ".tif", ".tiff", ".bmp")):
+                continue
+            label_base = os.path.splitext(img_name)[0]
+            label_path = os.path.join(label_folder, label_base + ".txt")
+            if os.path.exists(label_path):
+                self.annotations.append(img_name)
 
         self.len_ann = len(self.annotations)
-        if rect_training:
+
+        if self.rect_training:
             self.annotations = self.adaptive_shape(self.annotations)
+
 
     def __len__(self):
         return len(self.annotations)
 
     def __getitem__(self, idx):
 
-        img_name = self.annotations.iloc[idx, 0]
+        img_name = self.annotations[idx] if isinstance(self.annotations, list) else self.annotations.iloc[idx, 0]
 
         tile_size = 640
         overlap = 150
