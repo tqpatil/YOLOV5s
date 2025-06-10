@@ -126,7 +126,7 @@ class TiledTrainingDataset(Dataset):
 
         # Spatial transform
         if self.spatial_transform and bboxes:
-            aug = self.spatial_transform(image=tile, bboxes=bboxes, class_labels=class_labels)
+            aug = self.spatial_transform(image=tile, bboxes=bboxes, class_labels=abs_labels[:, 0].astype(int).tolist())
             tile = aug["image"]
             bboxes = aug["bboxes"]
             class_labels = aug["class_labels"]
