@@ -44,14 +44,14 @@ COLOR_TRANSFORMS = A.Compose(
         A.CLAHE(p=0.3),
         A.RandomGamma(p=0.3),
     ],
-    bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),
+    bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=labels,),
 )
 SPATIAL_TRANSFORMS = A.Compose([
     A.Transpose(p=1),
     A.HorizontalFlip(p=0.5),
     A.VerticalFlip(p=0.5),
     A.Rotate(limit=(-20, 20), p=0.7),
-], bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),)
+], bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=labels,),)
 
 
 FLIR = [

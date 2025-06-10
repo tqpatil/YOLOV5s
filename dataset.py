@@ -115,25 +115,51 @@ class TiledTrainingDataset(Dataset):
 
             abs_labels.append([class_id, box_x / self.tile_size, box_y / self.tile_size, box_w / self.tile_size, box_h / self.tile_size])
 
-        labels = np.array(abs_labels)
-        if self.spatial_transform:
-            aug = self.spatial_transform(image=tile, bboxes=labels)
-            tile = aug["image"]
-            labels = np.array(aug["bboxes"])
+        abs_labels = np.array(abs_labels)
 
+        if abs_labels.shape[0] > 0:
+            class_labels = abs_labels[:, 0].astype(int).tolist()
+            bboxes = abs_labels[:, 1:].tolist()
+        else:
+            class_labels = []
+            bboxes = []
+
+        # Spatial transform
+        if self.spatial_transform and bboxes:
+            aug = self.spatial_transform(image=tile, bboxes=bboxes, class_labels=class_labels)
+            tile = aug["image"]
+            bboxes = aug["bboxes"]
+            class_labels = aug["class_labels"]
+
+            abs_labels = []
+            for cls, bbox in zip(class_labels, bboxes):
+                abs_labels.append([cls] + list(bbox))
+            abs_labels = np.array(abs_labels)
+        else:
+            abs_labels = np.array([[cls] + list(bbox) for cls, bbox in zip(class_labels, bboxes)]) if bboxes else np.array([])
+
+        # Split channels for color transform
         rgb = tile[:, :, :3]
         alpha = tile[:, :, 3:]
 
-        if self.color_transform:
-            aug = self.color_transform(image=rgb, bboxes=labels)
+        # Color transform (apply only on rgb)
+        if self.color_transform and abs_labels.shape[0] > 0:
+            aug = self.color_transform(image=rgb, bboxes=abs_labels[:, 1:].tolist(), class_labels=abs_labels[:, 0].astype(int).tolist())
             rgb = aug["image"]
-            labels = np.array(aug["bboxes"])
+            bboxes = aug["bboxes"]
+            class_labels = aug["class_labels"]
 
+            abs_labels = []
+            for cls, bbox in zip(class_labels, bboxes):
+                abs_labels.append([cls] + list(bbox))
+            abs_labels = np.array(abs_labels)
+
+        # Recombine channels
         tile = np.concatenate([rgb, alpha], axis=2) if alpha.shape[2] == 1 else rgb
         tile = tile.transpose((2, 0, 1))
         tile = np.ascontiguousarray(tile)
 
-        labels_tensor = torch.from_numpy(labels) if len(labels) else torch.zeros((0, 5), dtype=torch.float32)
+        labels_tensor = torch.from_numpy(abs_labels) if abs_labels.size else torch.zeros((0, 5), dtype=torch.float32)
 
         return torch.from_numpy(tile), labels_tensor
 
@@ -287,16 +313,31 @@ class Validation_Dataset(Dataset):
 
         label_base = os.path.splitext(img_name)[0]
         label_path = os.path.join(self.root_directory, "labels", self.annot_folder, label_base + ".txt")
-        labels = np.loadtxt(fname=label_path, delimiter=" ", ndmin=2)
-        labels = labels[np.all(labels >= 0, axis=1), :]
-        labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
 
+        # Read labels safely; handle empty files gracefully
+        if os.path.exists(label_path):
+            labels = np.loadtxt(fname=label_path, delimiter=" ", ndmin=2)
+            if labels.size == 0:
+                labels = np.empty((0, 5))
+        else:
+            labels = np.empty((0, 5))
+
+        # Filter out invalid labels
+        labels = labels[np.all(labels >= 0, axis=1), :]
+
+        # Round bbox width and height to 3 decimal places (optional)
+        if labels.shape[0] > 0:
+            labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
+
+        # If bbox format is COCO, convert labels accordingly (class id is last in COCO)
         if self.bboxes_format == "coco":
-            labels[:, -1] -= 1
-            labels = np.roll(labels, axis=1, shift=1)
+            # COCO format: [x_min, y_min, width, height, class_id]?
+            # Adjust so that class_id is first and rest are converted to YOLO relative coords
+            labels[:, -1] -= 1  # zero-based class index
+            labels = np.roll(labels, axis=1, shift=1)  # shift class_id to front
             labels[:, 1:] = coco_to_yolo_tensors(labels[:, 1:], w0=W, h0=H)
 
-        # Convert YOLO (x_center, y_center, w, h) to pixel units
+        # Convert YOLO normalized to absolute pixel coordinates
         abs_boxes = []
         for label in labels:
             cls, xc, yc, bw, bh = label
@@ -307,21 +348,21 @@ class Validation_Dataset(Dataset):
             abs_boxes.append([x1, y1, x2, y2, cls])
         abs_boxes = np.array(abs_boxes)
 
-        # Tile the image
+        # Tile the image and clip boxes to tiles
         for y0 in range(0, H - tile_size + 1, stride):
             for x0 in range(0, W - tile_size + 1, stride):
                 tile = img[y0:y0 + tile_size, x0:x0 + tile_size]
                 tile_boxes = []
 
                 for x1, y1, x2, y2, cls in abs_boxes:
-                    # Calculate overlap between tile and bbox
+                    # Calculate overlap between bbox and tile
                     inter_x1 = max(x1, x0)
                     inter_y1 = max(y1, y0)
                     inter_x2 = min(x2, x0 + tile_size)
                     inter_y2 = min(y2, y0 + tile_size)
 
                     if inter_x1 < inter_x2 and inter_y1 < inter_y2:
-                        # Adjust to local tile coords
+                        # Convert clipped bbox back to tile relative YOLO coords
                         local_xc = ((inter_x1 + inter_x2) / 2 - x0) / tile_size
                         local_yc = ((inter_y1 + inter_y2) / 2 - y0) / tile_size
                         local_w = (inter_x2 - inter_x1) / tile_size
@@ -330,18 +371,20 @@ class Validation_Dataset(Dataset):
 
                 tile_boxes = np.array(tile_boxes)
 
+                # Apply augmentation transform if provided
                 if self.transform:
-                    augmentations = self.transform(image=tile,
-                                                bboxes=np.roll(tile_boxes, shift=4, axis=1) if len(tile_boxes) else [])
+                    # Albumentations expects bbox format with class id last, so roll the class id to end temporarily
+                    tile_boxes_aug = np.roll(tile_boxes, shift=-1, axis=1) if len(tile_boxes) else []
+                    augmentations = self.transform(image=tile, bboxes=tile_boxes_aug)
                     tile = augmentations["image"]
                     tile_boxes = np.array(augmentations["bboxes"])
                     if len(tile_boxes):
-                        tile_boxes = np.roll(tile_boxes, shift=1, axis=1)
+                        tile_boxes = np.roll(tile_boxes, shift=1, axis=1)  # roll class id back to front
 
                 tile = tile.transpose((2, 0, 1))
                 tile = np.ascontiguousarray(tile)
 
-                # Generate YOLO targets for this tile
+                # Prepare YOLO targets for this tile
                 classes = tile_boxes[:, 0].tolist() if len(tile_boxes) else []
                 bboxes = tile_boxes[:, 1:] if len(tile_boxes) else []
                 targets = [torch.zeros((self.num_anchors // 3, tile_size // S, tile_size // S, 6))
