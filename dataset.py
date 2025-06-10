@@ -416,7 +416,7 @@ class Validation_Dataset(Dataset):
                 tiles.append(torch.from_numpy(tile))
                 targets_per_tile.append(tuple(targets))
 
-        return tiles, targets_per_tile
+        return torch.tensor(tiles), targets_per_tile
 
     # this method modifies the target width and height of
     # the images by reshaping them so that the largest size of
