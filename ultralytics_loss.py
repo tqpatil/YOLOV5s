@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from utils.bboxes_utils import intersection_over_union
-from dataset import Training_Dataset
+from dataset import TiledTrainingDataset
 import config
 from model import YOLOV5s
 
@@ -311,41 +311,41 @@ class ComputeLoss:
         return tcls, tbox, indices, anch
 
 
-if __name__ == "__main__":
-    check_loss = True
-    batch_size = 8
-    image_height = 640
-    image_width = 640
-    nc = len(config.COCO80)
-    S = [8, 16, 32]
+# if __name__ == "__main__":
+#     check_loss = True
+#     batch_size = 8
+#     image_height = 640
+#     image_width = 640
+#     nc = len(config.COCO80)
+#     S = [8, 16, 32]
 
-    anchors = config.ANCHORS
-    first_out = 48
+#     anchors = config.ANCHORS
+#     first_out = 48
 
-    model = YOLOV5s(first_out=first_out, nc=nc, anchors=anchors,
-                    ch=(first_out * 4, first_out * 8, first_out * 16), inference=False).to(config.DEVICE)
+#     model = YOLOV5s(first_out=first_out, nc=nc, anchors=anchors,
+#                     ch=(first_out * 4, first_out * 8, first_out * 16), inference=False).to(config.DEVICE)
 
-    model.load_state_dict(state_dict=torch.load("yolov5m_coco.pt"), strict=True)
-    loss_fn = ComputeLoss(model, save_logs=False, filename="none")
+#     model.load_state_dict(state_dict=torch.load("yolov5m_coco.pt"), strict=True)
+#     loss_fn = ComputeLoss(model, save_logs=False, filename="none")
 
-    """dataset = MY_AUG_MS_COCO_2017(num_classes=nc, anchors=config.ANCHORS,
-                                  root_directory=config.ROOT_DIR, transform=None,
-                                  train=True, S=S, rect_training=True, default_size=640, bs=4,
-                                  bboxes_format="coco")"""
+#     """dataset = MY_AUG_MS_COCO_2017(num_classes=nc, anchors=config.ANCHORS,
+#                                   root_directory=config.ROOT_DIR, transform=None,
+#                                   train=True, S=S, rect_training=True, default_size=640, bs=4,
+#                                   bboxes_format="coco")"""
 
-    dataset = Training_Dataset(num_classes=nc, root_directory=config.ROOT_DIR, transform=None,
-                           train=True, rect_training=True, default_size=640, bs=8,
-                           bboxes_format="coco", ultralytics_loss=True)
+#     dataset = Training_Dataset(num_classes=nc, root_directory=config.ROOT_DIR, transform=None,
+#                            train=True, rect_training=True, default_size=640, bs=8,
+#                            bboxes_format="coco", ultralytics_loss=True)
 
-    collate_fn = dataset.collate_fn_ultra if dataset.ultralytics_loss else dataset.collate_fn
+#     collate_fn = dataset.collate_fn_ultra if dataset.ultralytics_loss else dataset.collate_fn
 
-    loader = DataLoader(dataset=dataset, batch_size=8, shuffle=False if dataset.rect_training else True, collate_fn=collate_fn)
+#     loader = DataLoader(dataset=dataset, batch_size=8, shuffle=False if dataset.rect_training else True, collate_fn=collate_fn)
 
-    for images, bboxes in loader:
-        images = images.float() / 255
-        preds = model(images)
-        loss = loss_fn(preds, bboxes, pred_size=images.shape[2:4], batch_idx=None, epoch=None)
-        print(loss)
+#     for images, bboxes in loader:
+#         images = images.float() / 255
+#         preds = model(images)
+#         loss = loss_fn(preds, bboxes, pred_size=images.shape[2:4], batch_idx=None, epoch=None)
+#         print(loss)
 
 
 
