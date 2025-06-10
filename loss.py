@@ -13,7 +13,6 @@ from utils.bboxes_utils import (
 from utils.plot_utils import cells_to_bboxes, plot_image
 import config
 from model import YOLOV5s
-from dataset import Training_Dataset
 import torch.nn.functional as F
 
 
@@ -246,66 +245,66 @@ class YOLO_LOSS:
         )
 
 
-if __name__ == "__main__":
-    check_loss = True
-    batch_size = 8
-    image_height = 640
-    image_width = 640
-    S = [8, 16, 32]
+# if __name__ == "__main__":
+#     check_loss = True
+#     batch_size = 8
+#     image_height = 640
+#     image_width = 640
+#     S = [8, 16, 32]
 
-    anchors = config.ANCHORS
-    first_out = 48
+#     anchors = config.ANCHORS
+#     first_out = 48
 
-    model = YOLOV5s(first_out=first_out, nc=len(config.COCO), anchors=anchors,
-                    ch=(first_out*4, first_out*8, first_out*16), inference=False).to(config.DEVICE)
+#     model = YOLOV5s(first_out=first_out, nc=len(config.COCO), anchors=anchors,
+#                     ch=(first_out*4, first_out*8, first_out*16), inference=False).to(config.DEVICE)
 
-    model.load_state_dict(state_dict=torch.load("yolov5s.pt"), strict=True)
+#     model.load_state_dict(state_dict=torch.load("yolov5s.pt"), strict=True)
 
-    dataset = Training_Dataset(num_classes=len(config.COCO),
-                           root_directory=config.ROOT_DIR, transform=config.TRAIN_TRANSFORMS,
-                           train=True, rect_training=True, default_size=640, bs=4, bboxes_format="coco")
+#     dataset = Training_Dataset(num_classes=len(config.COCO),
+#                            root_directory=config.ROOT_DIR, transform=config.TRAIN_TRANSFORMS,
+#                            train=True, rect_training=True, default_size=640, bs=4, bboxes_format="coco")
 
-    yolo_loss = YOLO_LOSS(model, rect_training=dataset.rect_training)
+#     yolo_loss = YOLO_LOSS(model, rect_training=dataset.rect_training)
 
-    loader = DataLoader(dataset=dataset, batch_size=4, shuffle=False if dataset.rect_training else True,
-                        collate_fn=dataset.collate_fn)
+#     loader = DataLoader(dataset=dataset, batch_size=4, shuffle=False if dataset.rect_training else True,
+#                         collate_fn=dataset.collate_fn)
 
-    if check_loss:
-        for images, bboxes in loader:
-            images = images/255
-            if not dataset.rect_training:
-                images = multi_scale(images, target_shape=640, max_stride=32)
+#     if check_loss:
+#         for images, bboxes in loader:
+#             images = images/255
+#             if not dataset.rect_training:
+#                 images = multi_scale(images, target_shape=640, max_stride=32)
 
-            preds = model(images)
-            start = time.time()
-            loss = yolo_loss(preds, bboxes, pred_size=images.shape[2:4])
+#             preds = model(images)
+#             start = time.time()
+#             loss = yolo_loss(preds, bboxes, pred_size=images.shape[2:4])
 
-            print(loss)
+#             print(loss)
 
-            """torch.manual_seed(1)
-            images = torch.rand((4, 3, 640, 640))
-            #img_idx = torch.arange(4).repeat(3, 1).T.reshape(12, 1)
-            classes = torch.arange(4).repeat(3, 1).T.reshape(12, 1)
-            bboxes = torch.randint(low=0, high=50, size=(12, 4)) / 100
-            labels = torch.cat([bboxes, classes], dim=-1).tolist()
-            print(loss(model(images), labels))"""
+#             """torch.manual_seed(1)
+#             images = torch.rand((4, 3, 640, 640))
+#             #img_idx = torch.arange(4).repeat(3, 1).T.reshape(12, 1)
+#             classes = torch.arange(4).repeat(3, 1).T.reshape(12, 1)
+#             bboxes = torch.randint(low=0, high=50, size=(12, 4)) / 100
+#             labels = torch.cat([bboxes, classes], dim=-1).tolist()
+#             print(loss(model(images), labels))"""
 
-    else:
-        for images, bboxes in loader:
-            images = images / 255
-            if not dataset.rect_training:
-                images = multi_scale(images, target_shape=640, max_stride=32)
+#     else:
+#         for images, bboxes in loader:
+#             images = images / 255
+#             if not dataset.rect_training:
+#                 images = multi_scale(images, target_shape=640, max_stride=32)
 
-            images = torch.unsqueeze(images[0], dim=0)  # keep just the first img but preserving bs
-            bboxes = bboxes[0]
-            targets = yolo_loss.build_targets(images, bboxes, images[0].shape[2:4])
-            targets = [torch.unsqueeze(target, dim=0) for target in targets]
+#             images = torch.unsqueeze(images[0], dim=0)  # keep just the first img but preserving bs
+#             bboxes = bboxes[0]
+#             targets = yolo_loss.build_targets(images, bboxes, images[0].shape[2:4])
+#             targets = [torch.unsqueeze(target, dim=0) for target in targets]
 
-            S = [8, 16, 32]
-            boxes = cells_to_bboxes(targets, torch.tensor(anchors), S, list_output=False)
-            boxes = nms(boxes, iou_threshold=1, threshold=0.7, max_detections=300)
+#             S = [8, 16, 32]
+#             boxes = cells_to_bboxes(targets, torch.tensor(anchors), S, list_output=False)
+#             boxes = nms(boxes, iou_threshold=1, threshold=0.7, max_detections=300)
 
-            plot_image(images[0].permute(1, 2, 0).to("cpu"), boxes[0])
+#             plot_image(images[0].permute(1, 2, 0).to("cpu"), boxes[0])
 
 
 
