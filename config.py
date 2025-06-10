@@ -4,13 +4,13 @@ import albumentations as A
 import torch.cuda
 
 parent_dir = Path(__file__).parent.parent
-ROOT_DIR = os.path.join(parent_dir, "datasets", "coco")
+ROOT_DIR = os.path.join(parent_dir, "datasets", "data")
 
 # if no yaml file, this must be manually inserted
 # nc is number of classes (int)
-nc = None
+nc = 4
 # list containing the labels of classes: i.e. ["cat", "dog"]
-labels = None
+labels = ['person', 'rider', 'crowd', 'uncertain'] 
 
 FIRST_OUT = 48
 
@@ -24,7 +24,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 IMAGE_SIZE = 640
 
 CONF_THRESHOLD = 0.01  # to get all possible bboxes, trade-off metrics/speed --> we choose metrics
-NMS_IOU_THRESH = 0.6
+NMS_IOU_THRESH = 0.5
 # for map 50
 MAP_IOU_THRESH = 0.5
 
@@ -142,5 +142,3 @@ COCO = [
     "toothbrush",
 ]
 
-nc = len(COCO)
-labels = COCO

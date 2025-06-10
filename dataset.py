@@ -24,7 +24,10 @@ class TiledTrainingDataset(Dataset):
                  tile_size=640,
                  overlap=150,
                  bboxes_format="yolo",
-                 train=True):
+                 train=True, 
+                 bs = 64,
+                 shuffle=True,
+                 ultralytics_loss = True):
 
         assert bboxes_format == "yolo", "Only YOLO bbox format supported for tiling"
 
@@ -212,7 +215,7 @@ class Validation_Dataset(Dataset):
                  rect_training=False,
                  default_size=640,
                  bs=64,
-                 bboxes_format="coco",
+                 bboxes_format="yolo",
                  ):
         """
         Parameters:

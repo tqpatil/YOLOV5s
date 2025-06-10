@@ -5,7 +5,7 @@ import math
 from tqdm import tqdm
 import config
 from torch.utils.data import DataLoader
-from dataset import Training_Dataset, Validation_Dataset
+from dataset import TiledTrainingDataset, Validation_Dataset
 
 
 def multi_scale(img, target_shape, max_stride):
@@ -35,19 +35,19 @@ def get_loaders(
         num_workers=4,
         pin_memory=torch.cuda.is_available(),
         rect_training=False,
-        box_format="coco",
+        box_format="yolo",
         ultralytics_loss=False
 ):
 
     S = [8, 16, 32]
 
-    train_augmentation = config.TRAIN_TRANSFORMS
+    color_aug = config.COLOR_TRANSFORMS
+    spat_aug = config.SPATIAL_TRANSFORMS
     val_augmentation = None
 
     # bs here is not batch_size, check class method "adaptive_shape" to check behavior
-    train_ds = Training_Dataset(root_directory=db_root_dir,
-                                transform=train_augmentation, train=True, rect_training=rect_training,
-                                bs=batch_size, bboxes_format=box_format, ultralytics_loss=ultralytics_loss)
+    train_ds = TiledTrainingDataset(root_directory=db_root_dir, color_transform=color_aug, spatial_transform=spat_aug, train=True,
+                                bs=batch_size, bboxes_format="yolo", ultralytics_loss=ultralytics_loss)
 
     val_ds = Validation_Dataset(anchors=config.ANCHORS,
                                 root_directory=db_root_dir, transform=val_augmentation,
@@ -69,8 +69,6 @@ def get_loaders(
         val_ds,
         batch_size=batch_size,
         num_workers=num_workers,
-        pin_memory=pin_memory,
-        shuffle=False,
         collate_fn=None,
     )
 
