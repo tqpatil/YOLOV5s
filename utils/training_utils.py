@@ -96,8 +96,8 @@ def train_loop(model, loader, optim, loss_fn, scaler, epoch, num_epochs, multi_s
     optim.zero_grad()
     for idx, (images, bboxes) in enumerate(loop):
         images = images.float() / 255
-        if multi_scale_training:
-            images = multi_scale(images, target_shape=640, max_stride=32)
+        # if multi_scale_training:
+        #     images = multi_scale(images, target_shape=640, max_stride=32)
 
         images = images.to(config.DEVICE, non_blocking=True)
         # BBOXES AND CLASSES ARE PUSHED to.(DEVICE) INSIDE THE LOSS_FN
