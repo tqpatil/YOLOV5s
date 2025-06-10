@@ -71,7 +71,7 @@ def get_loaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         shuffle=False,
-        collate_fn=None,
+        collate_fn=val_ds.collate_fn,
     )
 
     return train_loader, val_loader
