@@ -60,6 +60,8 @@ class TiledTrainingDataset(Dataset):
             for y in range(0, h - tile_size + 1, tile_size - overlap):
                 for x in range(0, w - tile_size + 1, tile_size - overlap):
                     self.tiles_index.append((img_name, x, y))
+        print(f"Total tiles generated: {len(self.tiles_index)}")
+
 
     def __len__(self):
         return len(self.tiles_index)
