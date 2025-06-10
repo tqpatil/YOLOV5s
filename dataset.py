@@ -13,50 +13,56 @@ from utils.plot_utils import plot_image, cells_to_bboxes
 import config
 import cv2
 import matplotlib.pyplot as plt
+
 from matplotlib.patches import Rectangle
 
 
 class TiledTrainingDataset(Dataset):
     def __init__(self,
-                 root_directory=config.ROOT_DIR,
+                 root_directory,
                  color_transform=None,
-                 spatial_transform = None,
+                 spatial_transform=None,
                  tile_size=640,
                  overlap=150,
                  bboxes_format="yolo",
-                 train=True, 
-                 bs = 64,
+                 train=True,
+                 bs=64,
                  shuffle=True,
-                 ultralytics_loss = True):
+                 ultralytics_loss=True):
 
-        assert bboxes_format == "yolo", "Only YOLO bbox format supported for tiling"
-
+        assert bboxes_format == "yolo", "Only YOLO bbox format supported"
         self.root_directory = root_directory
         self.color_transform = color_transform
         self.spatial_transform = spatial_transform
         self.tile_size = tile_size
         self.overlap = overlap
         self.train = train
-        self.bboxes_format = bboxes_format
+        self.shuffle = shuffle
+        self.bs = bs
 
-        fname = 'images/train' if train else 'images/val'
-        annot_file = "annot_train.csv" if train else "annot_val.csv"
+        self.fname = "images/train" if train else "images/val"
         self.annot_folder = "train" if train else "val"
-        self.fname = fname
+        self.ultralytics_loss = ultralytics_loss
 
-        self.annotations = pd.read_csv(os.path.join(root_directory, "labels", annot_file),
-                                       header=None, index_col=0).sort_values(by=[0])
-        self.annotations = self.annotations.head(len(self.annotations) - 1)
-
-        # List of (image_name, tile_x, tile_y)
         self.tiles_index = []
-        for i in range(len(self.annotations)):
-            img_name = self.annotations.iloc[i, 0]
-            img_w, img_h = self.annotations.iloc[i, 2], self.annotations.iloc[i, 1]
 
-            for y in range(0, img_h - tile_size + 1, tile_size - overlap):
-                for x in range(0, img_w - tile_size + 1, tile_size - overlap):
+        image_dir = os.path.join(root_directory, self.fname)
+        image_files = sorted([f for f in os.listdir(image_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".tif"))])
+
+        for img_name in image_files:
+            img_path = os.path.join(image_dir, img_name)
+            img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+            if img is None:
+                continue
+            h, w, c = img.shape
+            assert c == 4, f"{img_name} does not have 4 channels."
+
+            for y in range(0, h - tile_size + 1, tile_size - overlap):
+                for x in range(0, w - tile_size + 1, tile_size - overlap):
                     self.tiles_index.append((img_name, x, y))
+
+        if self.shuffle:
+            random.shuffle(self.tiles_index)
 
     def __len__(self):
         return len(self.tiles_index)
@@ -66,56 +72,58 @@ class TiledTrainingDataset(Dataset):
         img_path = os.path.join(self.root_directory, self.fname, img_name)
         label_path = os.path.join(self.root_directory, "labels", self.annot_folder, img_name[:-4] + ".txt")
 
-        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)  # shape: (H, W, 4)
+        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         assert img is not None, f"Image not found: {img_path}"
         h, w, c = img.shape
-        assert c == 4, "Expected 4-channel images"
+        assert c == 4, f"Expected 4-channel image, got {c}"
 
         tile = img[y_off:y_off + self.tile_size, x_off:x_off + self.tile_size]
         tile = np.ascontiguousarray(tile)
 
-        # Load and filter labels
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            labels = np.loadtxt(label_path, delimiter=" ", ndmin=2)
-            labels = labels[np.all(labels >= 0, axis=1)]
-            labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
-
-        # Convert normalized YOLO bboxes to absolute xywh
         abs_labels = []
-        for label in labels:
-            class_id, x_c, y_c, w_box, h_box = label
-            x1 = (x_c - w_box / 2) * w
-            y1 = (y_c - h_box / 2) * h
-            x2 = (x_c + w_box / 2) * w
-            y2 = (y_c + h_box / 2) * h
+        if os.path.exists(label_path):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                labels = np.loadtxt(label_path, delimiter=" ", ndmin=2)
+                labels = labels[np.all(labels >= 0, axis=1)]
+                labels[:, 3:5] = np.floor(labels[:, 3:5] * 1000) / 1000
 
-            # Check if box intersects tile
-            if x2 < x_off or x1 > x_off + self.tile_size:
-                continue
-            if y2 < y_off or y1 > y_off + self.tile_size:
-                continue
+            for label in labels:
+                class_id, x_c, y_c, w_box, h_box = label
+                x1 = (x_c - w_box / 2) * w
+                y1 = (y_c - h_box / 2) * h
+                x2 = (x_c + w_box / 2) * w
+                y2 = (y_c + h_box / 2) * h
 
-            # Clip and translate box to tile coordinates
-            x1_tile = np.clip(x1 - x_off, 0, self.tile_size)
-            y1_tile = np.clip(y1 - y_off, 0, self.tile_size)
-            x2_tile = np.clip(x2 - x_off, 0, self.tile_size)
-            y2_tile = np.clip(y2 - y_off, 0, self.tile_size)
+                if x2 < x_off or x1 > x_off + self.tile_size:
+                    continue
+                if y2 < y_off or y1 > y_off + self.tile_size:
+                    continue
 
-            # Convert back to YOLO
-            box_w = x2_tile - x1_tile
-            box_h = y2_tile - y1_tile
-            box_x = x1_tile + box_w / 2
-            box_y = y1_tile + box_h / 2
+                x1_tile = np.clip(x1 - x_off, 0, self.tile_size)
+                y1_tile = np.clip(y1 - y_off, 0, self.tile_size)
+                x2_tile = np.clip(x2 - x_off, 0, self.tile_size)
+                y2_tile = np.clip(y2 - y_off, 0, self.tile_size)
 
-            abs_labels.append([class_id, box_x / self.tile_size, box_y / self.tile_size, box_w / self.tile_size, box_h / self.tile_size])
+                box_w = x2_tile - x1_tile
+                box_h = y2_tile - y1_tile
+                box_x = x1_tile + box_w / 2
+                box_y = y1_tile + box_h / 2
+
+                abs_labels.append([
+                    class_id,
+                    box_x / self.tile_size,
+                    box_y / self.tile_size,
+                    box_w / self.tile_size,
+                    box_h / self.tile_size
+                ])
 
         labels = np.array(abs_labels)
         if self.spatial_transform:
-            aug = self.spatial_transform(image = tile, bboxes = labels)
+            aug = self.spatial_transform(image=tile, bboxes=labels)
             tile = aug["image"]
             labels = np.array(aug["bboxes"])
-        # Transform only first 3 channels (RGB)
+
         rgb = tile[:, :, :3]
         alpha = tile[:, :, 3:]
 
@@ -124,13 +132,11 @@ class TiledTrainingDataset(Dataset):
             rgb = aug["image"]
             labels = np.array(aug["bboxes"])
 
-        # Reattach alpha if needed
         tile = np.concatenate([rgb, alpha], axis=2) if alpha.shape[2] == 1 else rgb
-        tile = tile.transpose((2, 0, 1))  # CHW
+        tile = tile.transpose((2, 0, 1))
         tile = np.ascontiguousarray(tile)
 
         return torch.from_numpy(tile), torch.from_numpy(labels) if len(labels) else torch.zeros((0, 5))
-
 
 
     # this method modifies the target width and height of
