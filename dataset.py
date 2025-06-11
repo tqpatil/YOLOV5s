@@ -367,14 +367,20 @@ class Validation_Dataset(Dataset):
         return tile_tensor, labels_tensor
         
     @staticmethod
-    def collate_fn(batch):
-        images = []
+    def collate_fn_ultra(batch):
+        images, labels = zip(*batch)  # List[Tensor], List[Tensor]
+        batch_size = len(images)
+
         targets = []
-        for img, labels in batch:
-            images.append(img)
-            targets.append(labels)
-        images = torch.stack(images, dim=0)
-        return images, targets
+        for i, label in enumerate(labels):
+            if label.numel() == 0:
+                continue
+            label = label.clone()
+            img_idx_col = torch.full((label.shape[0], 1), i)
+            label = torch.cat([img_idx_col, label], dim=1)  # shape: (N, 6) -> [img_idx, class, x, y, w, h]
+            targets.append(label)
+
+        return torch.stack(images, 0), torch.cat(targets, 0) if targets else torch.zeros((0, 6))
 
 
 if __name__ == "__main__":
