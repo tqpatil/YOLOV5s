@@ -355,16 +355,7 @@ class Validation_Dataset(Dataset):
         labels_tensor = torch.from_numpy(abs_labels) if abs_labels.size else torch.zeros((0, 5), dtype=torch.float32)
 
         return tile_tensor, labels_tensor
-    
-    @staticmethod
-    def collate_fn(batch):
-        images = []
-        targets = []
-        for img, labels in batch:
-            images.append(img)
-            targets.append(labels)
-        images = torch.stack(images, dim=0)
-        return images, targets
+
 
 
 if __name__ == "__main__":
