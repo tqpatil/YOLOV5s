@@ -356,10 +356,14 @@ class Validation_Dataset(Dataset):
 
         return tile_tensor, labels_tensor
 
-    @staticmethod
     def collate_fn(batch):
-        images, targets = zip(*batch)
-        return list(images), list(targets)
+        images = []
+        targets = []
+        for img, labels in batch:
+            images.append(img)
+            targets.append(labels)
+        images = torch.stack(images, dim=0)
+        return images, targets
 
 
 if __name__ == "__main__":
