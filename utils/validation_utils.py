@@ -49,7 +49,6 @@ class YOLO_EVAL:
         tot_obj, correct_obj = 0, 0
 
         for idx, (images, y) in enumerate(tqdm(loader)):
-            images = torch.tensor(images)
             images = images.to(self.device)
             images = images.float() / 255
             with torch.no_grad():
