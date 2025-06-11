@@ -299,16 +299,20 @@ class Validation_Dataset(Dataset):
 
         labels = []
         if os.path.exists(label_path):
-            labels = np.loadtxt(label_path, delimiter=" ", ndmin=2)
-            labels = labels[np.all(labels >= 0, axis=1)] if labels.size > 0 else []
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                labels = np.loadtxt(label_path, delimiter=" ", ndmin=2)
+                if labels.size > 0:
+                    labels = labels[np.all(labels >= 0, axis=1)]
+                    labels = np.atleast_2d(labels)
 
         abs_labels = []
         for label in labels:
-            class_id, x_c, y_c, box_w, box_h = label
-            x1 = (x_c - box_w / 2) * w
-            y1 = (y_c - box_h / 2) * h
-            x2 = (x_c + box_w / 2) * w
-            y2 = (y_c + box_h / 2) * h
+            class_id, x_c, y_c, w_box, h_box = label
+            x1 = (x_c - w_box / 2) * w
+            y1 = (y_c - h_box / 2) * h
+            x2 = (x_c + w_box / 2) * w
+            y2 = (y_c + h_box / 2) * h
 
             if x2 <= x_off or x1 >= x_off + self.tile_size or y2 <= y_off or y1 >= y_off + self.tile_size:
                 continue
@@ -318,44 +322,59 @@ class Validation_Dataset(Dataset):
             x2_tile = np.clip(x2 - x_off, 0, self.tile_size)
             y2_tile = np.clip(y2 - y_off, 0, self.tile_size)
 
-            tile_w = x2_tile - x1_tile
-            tile_h = y2_tile - y1_tile
-            tile_x = x1_tile + tile_w / 2
-            tile_y = y1_tile + tile_h / 2
+            box_w = x2_tile - x1_tile
+            box_h = y2_tile - y1_tile
+            box_x = x1_tile + box_w / 2
+            box_y = y1_tile + box_h / 2
 
-            if tile_w <= 0 or tile_h <= 0:
+            if box_w <= 0 or box_h <= 0:
                 continue
 
             abs_labels.append([
                 class_id,
-                tile_x / self.tile_size,
-                tile_y / self.tile_size,
-                tile_w / self.tile_size,
-                tile_h / self.tile_size
+                box_x / self.tile_size,
+                box_y / self.tile_size,
+                box_w / self.tile_size,
+                box_h / self.tile_size
             ])
 
         abs_labels = np.array(abs_labels)
 
-        # Apply optional color transform (no spatial!)
+        # --- Spatial Transform (none for val) ---
+
+        # Split channels for color transform
         rgb = tile[:, :, :3]
         alpha = tile[:, :, 3:]
 
+        # Apply optional color transform (on rgb only)
         if self.transform and abs_labels.shape[0] > 0:
             aug = self.transform(image=rgb, bboxes=abs_labels[:, 1:].tolist(), class_labels=abs_labels[:, 0].astype(int).tolist())
             rgb = aug["image"]
             bboxes = aug["bboxes"]
             class_labels = aug["class_labels"]
             abs_labels = np.array([[cls] + list(bbox) for cls, bbox in zip(class_labels, bboxes)])
-        
-        # Recombine RGB + alpha and convert to CHW
+
+        # Recombine channels
         tile = np.concatenate([rgb, alpha], axis=2) if alpha.shape[2] == 1 else rgb
         tile = tile.transpose((2, 0, 1)).astype(np.float32)
         tile_tensor = torch.from_numpy(tile)
 
-        labels_tensor = torch.from_numpy(abs_labels) if abs_labels.size else torch.zeros((0, 5), dtype=torch.float32)
+        if abs_labels.shape[0] > 0:
+            labels_tensor = torch.from_numpy(abs_labels).float()
+        else:
+            labels_tensor = torch.zeros((0, 5), dtype=torch.float32)
 
         return tile_tensor, labels_tensor
-
+        
+    @staticmethod
+    def collate_fn(batch):
+        images = []
+        targets = []
+        for img, labels in batch:
+            images.append(img)
+            targets.append(labels)
+        images = torch.stack(images, dim=0)
+        return images, targets
 
 
 if __name__ == "__main__":
