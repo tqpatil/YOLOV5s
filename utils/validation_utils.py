@@ -112,14 +112,14 @@ class YOLO_EVAL:
                 dict(
                     boxes=pred_boxes[..., 2:],
                     scores=pred_boxes[..., 1],
-                    labels=pred_boxes[..., 0],
+                    labels=pred_boxes[..., 0].long(),
                 )
             )
 
             targets.append(
                 dict(
                     boxes=true_boxes[..., 2:],
-                    labels=true_boxes[..., 0],
+                    labels=true_boxes[..., 0].long(),
                 )
             )
 
