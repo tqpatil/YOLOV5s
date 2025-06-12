@@ -97,6 +97,7 @@ if __name__ == "__main__":
     
     tiles,_ = tile_image_tensor(img, 640, 150)
     for i, tile in enumerate(tiles):
+        print(tile.shape)
         with torch.no_grad():
             out = model(tile)
         bboxes = cells_to_bboxes(out, model.head.anchors, model.head.stride, is_pred=True, to_list=False)
