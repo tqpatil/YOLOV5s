@@ -100,7 +100,7 @@ if __name__ == "__main__":
         out = model(tiles)
     
     bboxes = cells_to_bboxes(out, model.head.anchors, model.head.stride, is_pred=True, to_list=False)
-    bboxes = non_max_suppression(bboxes, iou_threshold=0.45, threshold=0.25, to_list=False)
+    bboxes = non_max_suppression(bboxes, iou_threshold=0.45, threshold=0.25, tolist=False)
     plot_image(img[0].permute(1, 2, 0).to("cpu"), bboxes, config.FLIR)
 
 
