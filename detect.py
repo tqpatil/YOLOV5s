@@ -99,7 +99,7 @@ if __name__ == "__main__":
     for i, tile in enumerate(tiles):
         tile = torch.unsqueeze(tile, 0)
         with torch.no_grad():
-            out = model()
+            out = model(tile)
         bboxes = cells_to_bboxes(out, model.head.anchors, model.head.stride, is_pred=True, to_list=False)
         bboxes = non_max_suppression(bboxes, iou_threshold=0.45, threshold=0.25, tolist=False)
         tile_np = tile[:3, :, :].permute(1, 2, 0).cpu().numpy()  
