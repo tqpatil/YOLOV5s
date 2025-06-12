@@ -95,7 +95,7 @@ if __name__ == "__main__":
         img = np.array(cv2.imread(args.img, cv2.IMREAD_UNCHANGED))
 
     
-    tiles,_ = tile_image_tensor(img, 640, 160)
+    tiles,_ = tile_image_tensor(img, 640, 150)
     for i, tile in enumerate(tiles):
         tile = torch.unsqueeze(tile, 0)
         with torch.no_grad():
