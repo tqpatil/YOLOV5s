@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
     random_img = not args.img
 
-    model = YOLOV5s(first_out=first_out, nc=nc, anchors=config.ANCHORS,
+    model = YOLOV5s(first_out=first_out, nc=config.nc, anchors=config.ANCHORS,
                     ch=(first_out * 4, first_out * 8, first_out * 16)).to(config.DEVICE)
 
     path2model = os.path.join("SAVED_CHECKPOINT", args.model_name, args.checkpoint)
