@@ -26,6 +26,8 @@ def cells_to_bboxes(predictions, anchors, strides, is_pred=False, to_list=True):
         anchor_grid[i] = anchor_grid[i].to(config.DEVICE)
 
         if is_pred:
+            predictions[i] = predictions[i].to(config.DEVICE)
+            grid[i] = grid[i].to(config.DEVICE)
             layer_prediction = predictions[i].sigmoid()
             obj = layer_prediction[..., 4:5]
             xy = (2 * (layer_prediction[..., 0:2]) + grid[i] - 0.5) * stride
