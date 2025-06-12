@@ -98,9 +98,11 @@ if __name__ == "__main__":
     tiles,_ = tile_image_tensor(img, 640, 150)
     with torch.no_grad():
         out = model(tiles)
-    print(out[0].shape)
-    bboxes = cells_to_bboxes(out, model.head.anchors, model.head.stride, is_pred=True, to_list=False)
-    bboxes = non_max_suppression(bboxes, iou_threshold=0.45, threshold=0.25, tolist=False)
+    outputs = []
+    for item in out:
+        bboxes = cells_to_bboxes(item, model.head.anchors, model.head.stride, is_pred=True, to_list=False)
+        bboxes = non_max_suppression(bboxes, iou_threshold=0.45, threshold=0.25, tolist=False)
+        outputs.append(bboxes)
 
     plot_image(img[0].permute(1, 2, 0).to("cpu"), bboxes, config.labels)
 
