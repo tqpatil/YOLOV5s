@@ -21,9 +21,9 @@ def cells_to_bboxes(predictions, anchors, strides, is_pred=False, to_list=True):
         grid[i], anchor_grid[i] = make_grids(anchors, naxs, ny=ny, nx=nx, stride=stride, i=i)
 
         # move grid to same device as predictions
-        device = predictions[i].device
-        grid[i] = grid[i].to(device)
-        anchor_grid[i] = anchor_grid[i].to(device)
+        # device = predictions[i].device
+        # grid[i] = grid[i].to(device)
+        anchor_grid[i] = anchor_grid[i].to(config.DEVICE)
 
         if is_pred:
             layer_prediction = predictions[i].sigmoid()
@@ -32,7 +32,8 @@ def cells_to_bboxes(predictions, anchors, strides, is_pred=False, to_list=True):
             wh = ((2 * layer_prediction[..., 2:4]) ** 2) * anchor_grid[i]
             best_class = torch.argmax(layer_prediction[..., 5:], dim=-1).unsqueeze(-1)
         else:
-            predictions[i] = predictions[i].to(config.DEVICE, non_blocking=True)
+            predictions[i] = predictions[i].to(config.DEVICE)
+            grid[i] = grid[i].to(config.DEVICE)
             obj = predictions[i][..., 4:5]
             xy = (predictions[i][..., 0:2] + grid[i]) * stride
             wh = predictions[i][..., 2:4] * stride
