@@ -234,69 +234,46 @@ class TiledTrainingDataset(Dataset):
 
         return torch.stack(images, 0), torch.cat(targets, 0) if targets else torch.zeros((0, 6))
 
+def bbox_iou_wh(boxes1, boxes2):
+    # Intersection over union for width-height only (YOLO-style anchor matching)
+    min_wh = torch.min(boxes1, boxes2)
+    inter = min_wh[:, 0] * min_wh[:, 1]
+    area1 = boxes1[:, 0] * boxes1[:, 1]
+    area2 = boxes2[:, 0] * boxes2[:, 1]
+    union = area1 + area2 - inter
+    return inter / (union + 1e-6)
 
-def encode_yolo_targets(labels, anchors, strides, num_classes, img_size):
-    """
-    Args:
-        labels: tensor of shape [N, 5], each row [class_id, x_center, y_center, w, h], normalized (0-1)
-        anchors: list of 3 tensors, each tensor shape [num_anchors_per_scale, 2] (width, height normalized by stride)
-        strides: list of 3 ints, stride per scale (e.g., [8,16,32])
-        num_classes: int, number of classes
-        img_size: int, input image size (assumed square)
+def encode_yolo_targets(targets, anchors, strides, num_classes, img_size):
+    device = targets.device
+    batch_targets = []
 
-    Returns:
-        targets: list of 3 tensors, each shape [batch=1, grid, grid, num_anchors, 5+num_classes]
-    """
+    for i, stride in enumerate(strides):
+        S = img_size // stride
+        anchor = anchors[i].to(device)  # shape: (num_anchors, 2)
 
-    targets = []
-    device = labels.device if isinstance(labels, torch.Tensor) else 'cpu'
+        num_anchors = anchor.shape[0]
+        target_scale = torch.zeros((num_anchors, S, S, 6), device=device)  # obj, x, y, w, h, class
 
-    for scale_idx, stride in enumerate(strides):
-        grid_size = img_size // stride
-        num_anchors = anchors[scale_idx].shape[0]
+        for label in targets:
+            class_id, x, y, w, h = label
+            x_cell = x * S
+            y_cell = y * S
+            i_cell, j_cell = int(x_cell), int(y_cell)
+            box = torch.tensor([w, h], device=device)
 
-        # Initialize target tensor with zeros
-        target_tensor = torch.zeros((grid_size, grid_size, num_anchors, 5 + num_classes), device=device)
+            ious = bbox_iou_wh(box.unsqueeze(0), anchor)
+            best_anchor = torch.argmax(ious)
 
-        if labels.shape[0] == 0:
-            targets.append(target_tensor)
-            continue
+            target_scale[best_anchor, j_cell, i_cell, 0] = 1  # objectness
+            target_scale[best_anchor, j_cell, i_cell, 1] = x_cell - i_cell  # offset inside cell
+            target_scale[best_anchor, j_cell, i_cell, 2] = y_cell - j_cell
+            target_scale[best_anchor, j_cell, i_cell, 3] = w
+            target_scale[best_anchor, j_cell, i_cell, 4] = h
+            target_scale[best_anchor, j_cell, i_cell, 5] = class_id
 
-        # Scale boxes to grid size
-        boxes_scaled = labels[:, 1:5] * grid_size  # x_c, y_c, w, h scaled to grid
+        batch_targets.append(target_scale)
 
-        class_ids = labels[:, 0].long()
-
-        for i, (cls, box) in enumerate(zip(class_ids, boxes_scaled)):
-            x_c, y_c, w, h = box
-
-            # Find the best anchor (IoU with anchors) for this scale
-            box_wh = torch.tensor([w, h], device=device)
-            anchor_shapes = anchors[scale_idx].to(device)
-
-            # Calculate IoU of box_wh with each anchor at this scale (simple IoU)
-            inter_area = torch.min(anchor_shapes[:, 0], box_wh[0]) * torch.min(anchor_shapes[:, 1], box_wh[1])
-            union_area = (anchor_shapes[:, 0] * anchor_shapes[:, 1]) + (box_wh[0] * box_wh[1]) - inter_area
-            ious = inter_area / union_area
-
-            best_anchor_idx = torch.argmax(ious)
-
-            # Get grid cell indices
-            grid_x, grid_y = int(x_c), int(y_c)
-
-            if grid_x >= grid_size or grid_y >= grid_size:
-                continue  # ignore boxes outside the grid (should rarely happen)
-
-            # Set objectness = 1
-            target_tensor[grid_y, grid_x, best_anchor_idx, 0] = 1.0
-            # Set box coordinates (relative to cell)
-            target_tensor[grid_y, grid_x, best_anchor_idx, 1:5] = torch.tensor([x_c - grid_x, y_c - grid_y, w, h], device=device)
-            # Set class one-hot vector
-            target_tensor[grid_y, grid_x, best_anchor_idx, 5 + cls] = 1.0
-
-        targets.append(target_tensor)
-
-    return targets
+    return batch_targets
 
 class Validation_Dataset(Dataset):
     def __init__(self,
@@ -446,17 +423,15 @@ class Validation_Dataset(Dataset):
             num_classes=config.nc,
             img_size=self.tile_size
         )
-
+        targets = [torch.from_numpy(t).float() if isinstance(t, np.ndarray) else t for t in targets]
         return tile_tensor, targets
 
     @staticmethod
     def collate_fn(batch):
-        imgs, targets = list(zip(*batch))
+        imgs, targets = zip(*batch)
         imgs = torch.stack(imgs, dim=0)
-        
         targets_per_scale = list(zip(*targets))
-        targets_stacked = [torch.stack(scale_targets, dim=0) for scale_targets in targets_per_scale]
-
+        targets_stacked = [torch.stack(t, dim=0) for t in targets_per_scale]  # shape [B, num_anchors, S, S, 6]
         return imgs, targets_stacked
 
 
