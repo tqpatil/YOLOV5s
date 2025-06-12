@@ -103,9 +103,8 @@ if __name__ == "__main__":
         bboxes = cells_to_bboxes(out, model.head.anchors, model.head.stride, is_pred=True, to_list=False)
         # bboxes = non_max_suppression(bboxes, iou_threshold=0.45, threshold=0.25, tolist=False)
         bboxes = non_max_suppression(bboxes, iou_threshold=0.15, threshold=0.01, tolist=False)
-
         tile = torch.squeeze(tile)
         tile_np = tile[:3, :, :].permute(1, 2, 0).cpu().numpy()  
-        plot_image(tile_np, bboxes, config.labels, filename=f"figs/{i}.png")
+        plot_image(tile_np, bboxes.cpu(), config.labels, filename=f"figs/{i}.png")
 
 
