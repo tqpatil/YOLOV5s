@@ -101,7 +101,7 @@ if __name__ == "__main__":
         out = model(tiles)
     outputs = []
     for i in range(len(out[0])):
-        bboxes = cells_to_bboxes([out[i]], model.head.anchors, model.head.stride, is_pred=True, to_list=False)
+        bboxes = cells_to_bboxes([out[0][i]], model.head.anchors, model.head.stride, is_pred=True, to_list=False)
         bboxes = non_max_suppression(bboxes, iou_threshold=0.45, threshold=0.25, tolist=False)
         outputs.append(bboxes)
     print(len(outputs))
