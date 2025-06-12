@@ -99,6 +99,7 @@ if __name__ == "__main__":
     print(len(tiles))
     with torch.no_grad():
         out = model(tiles)
+    print(out)
     outputs = []
     for i in range(len(out)):
         bboxes = cells_to_bboxes([out[i]], model.head.anchors, model.head.stride, is_pred=True, to_list=False)
