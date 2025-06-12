@@ -235,6 +235,68 @@ class TiledTrainingDataset(Dataset):
         return torch.stack(images, 0), torch.cat(targets, 0) if targets else torch.zeros((0, 6))
 
 
+def encode_yolo_targets(labels, anchors, strides, num_classes, img_size):
+    """
+    Args:
+        labels: tensor of shape [N, 5], each row [class_id, x_center, y_center, w, h], normalized (0-1)
+        anchors: list of 3 tensors, each tensor shape [num_anchors_per_scale, 2] (width, height normalized by stride)
+        strides: list of 3 ints, stride per scale (e.g., [8,16,32])
+        num_classes: int, number of classes
+        img_size: int, input image size (assumed square)
+
+    Returns:
+        targets: list of 3 tensors, each shape [batch=1, grid, grid, num_anchors, 5+num_classes]
+    """
+
+    targets = []
+    device = labels.device if isinstance(labels, torch.Tensor) else 'cpu'
+
+    for scale_idx, stride in enumerate(strides):
+        grid_size = img_size // stride
+        num_anchors = anchors[scale_idx].shape[0]
+
+        # Initialize target tensor with zeros
+        target_tensor = torch.zeros((grid_size, grid_size, num_anchors, 5 + num_classes), device=device)
+
+        if labels.shape[0] == 0:
+            targets.append(target_tensor)
+            continue
+
+        # Scale boxes to grid size
+        boxes_scaled = labels[:, 1:5] * grid_size  # x_c, y_c, w, h scaled to grid
+
+        class_ids = labels[:, 0].long()
+
+        for i, (cls, box) in enumerate(zip(class_ids, boxes_scaled)):
+            x_c, y_c, w, h = box
+
+            # Find the best anchor (IoU with anchors) for this scale
+            box_wh = torch.tensor([w, h], device=device)
+            anchor_shapes = anchors[scale_idx].to(device)
+
+            # Calculate IoU of box_wh with each anchor at this scale (simple IoU)
+            inter_area = torch.min(anchor_shapes[:, 0], box_wh[0]) * torch.min(anchor_shapes[:, 1], box_wh[1])
+            union_area = (anchor_shapes[:, 0] * anchor_shapes[:, 1]) + (box_wh[0] * box_wh[1]) - inter_area
+            ious = inter_area / union_area
+
+            best_anchor_idx = torch.argmax(ious)
+
+            # Get grid cell indices
+            grid_x, grid_y = int(x_c), int(y_c)
+
+            if grid_x >= grid_size or grid_y >= grid_size:
+                continue  # ignore boxes outside the grid (should rarely happen)
+
+            # Set objectness = 1
+            target_tensor[grid_y, grid_x, best_anchor_idx, 0] = 1.0
+            # Set box coordinates (relative to cell)
+            target_tensor[grid_y, grid_x, best_anchor_idx, 1:5] = torch.tensor([x_c - grid_x, y_c - grid_y, w, h], device=device)
+            # Set class one-hot vector
+            target_tensor[grid_y, grid_x, best_anchor_idx, 5 + cls] = 1.0
+
+        targets.append(target_tensor)
+
+    return targets
 
 class Validation_Dataset(Dataset):
     def __init__(self,
@@ -316,6 +378,7 @@ class Validation_Dataset(Dataset):
             x2 = (x_c + w_box / 2) * w
             y2 = (y_c + h_box / 2) * h
 
+            # Skip boxes outside the tile
             if x2 <= x_off or x1 >= x_off + self.tile_size or y2 <= y_off or y1 >= y_off + self.tile_size:
                 continue
 
@@ -350,7 +413,11 @@ class Validation_Dataset(Dataset):
 
         # Apply optional color transform (on rgb only)
         if self.transform and abs_labels.shape[0] > 0:
-            aug = self.transform(image=rgb, bboxes=abs_labels[:, 1:].tolist(), class_labels=abs_labels[:, 0].astype(int).tolist())
+            aug = self.transform(
+                image=rgb,
+                bboxes=abs_labels[:, 1:].tolist(),
+                class_labels=abs_labels[:, 0].astype(int).tolist()
+            )
             rgb = aug["image"]
             bboxes = aug["bboxes"]
             class_labels = aug["class_labels"]
@@ -361,18 +428,33 @@ class Validation_Dataset(Dataset):
         tile = tile.transpose((2, 0, 1)).astype(np.float32)
         tile_tensor = torch.from_numpy(tile)
 
+        # Convert abs_labels to tensor
         if abs_labels.shape[0] > 0:
-            labels_tensor = torch.from_numpy(abs_labels).float()
+            abs_labels_tensor = torch.from_numpy(abs_labels).float()
         else:
-            labels_tensor = torch.zeros((0, 5), dtype=torch.float32)
+            abs_labels_tensor = torch.zeros((0, 5), dtype=torch.float32)
 
-        return tile_tensor, labels_tensor
-        
+        # Now encode targets for all scales using encode_yolo_targets
+        targets = encode_yolo_targets(
+            abs_labels_tensor,
+            anchors=self.anchors,  # list of tensors [[num_anchors, 2], ...] normalized by stride
+            strides=self.strides,  # list of ints like [8,16,32]
+            num_classes=self.num_classes,
+            img_size=self.tile_size
+        )
+
+        return tile_tensor, targets
+
     @staticmethod
     def collate_fn(batch):
-        imgs, labels = list(zip(*batch))
-        imgs = default_collate(imgs)
-        return imgs, labels
+        imgs, targets = list(zip(*batch))
+        imgs = torch.stack(imgs, dim=0)
+        
+        targets_per_scale = list(zip(*targets))
+        targets_stacked = [torch.stack(scale_targets, dim=0) for scale_targets in targets_per_scale]
+
+        return imgs, targets_stacked
+
 
 
 
