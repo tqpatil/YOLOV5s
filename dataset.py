@@ -298,7 +298,7 @@ class Validation_Dataset(Dataset):
         self.tile_size = default_size
         self.bs = bs
         self.bboxes_format = bboxes_format
-        self.overlap = 150
+        self.overlap = 280
 
         self.annot_folder = "val"
         self.img_folder = os.path.join(root_directory, "images", self.annot_folder)
