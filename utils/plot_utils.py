@@ -150,7 +150,7 @@ def save_predictions(model, loader, folder, epoch, device, filename, num_images=
     model.train()
 
 
-def plot_image(image, boxes, labels=config.COCO):
+def plot_image(image, boxes, labels=config.COCO, filename=None):
     """Plots predicted bounding boxes on the image"""
     cmap = plt.get_cmap("tab20b")
     class_labels = labels
@@ -200,4 +200,6 @@ def plot_image(image, boxes, labels=config.COCO):
             verticalalignment="top",
             bbox={"color": colors[int(class_pred)], "pad": 0},
         )
+    if filename:
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.show()
