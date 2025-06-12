@@ -433,11 +433,15 @@ class Validation_Dataset(Dataset):
             abs_labels_tensor = torch.from_numpy(abs_labels).float()
         else:
             abs_labels_tensor = torch.zeros((0, 5), dtype=torch.float32)
+        anchors_normalized = [
+            torch.tensor(anchors, dtype=torch.float32) / stride
+            for anchors, stride in zip(self.anchors, self.S)
+        ]
 
         # Now encode targets for all scales using encode_yolo_targets
         targets = encode_yolo_targets(
             abs_labels_tensor,
-            anchors=self.anchors,  # list of tensors [[num_anchors, 2], ...] normalized by stride
+            anchors=anchors_normalized,  # list of tensors [[num_anchors, 2], ...] normalized by stride
             strides=self.S,  # list of ints like [8,16,32]
             num_classes=config.nc,
             img_size=self.tile_size
