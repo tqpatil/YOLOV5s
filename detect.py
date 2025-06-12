@@ -45,8 +45,9 @@ def tile_image_tensor(img, tile_size, overlap, save_dir=None):
                 pad_y = tile_size - tile.shape[0]
                 pad_x = tile_size - tile.shape[1]
                 tile = cv2.copyMakeBorder(tile, 0, pad_y, 0, pad_x, cv2.BORDER_CONSTANT, value=0)
-
+    
             tiles.append(tile)
+            
             offsets.append((x, y))
 
             if save_dir:
@@ -93,10 +94,7 @@ if __name__ == "__main__":
 
         img = np.array(cv2.imread(args.img, cv2.IMREAD_UNCHANGED))
 
-    img = img.transpose((2, 0, 1))
-    img = img[None, :]
-    img = torch.from_numpy(img)
-    img = img.float() / 255
+    
     tiles,_ = tile_image_tensor(img, 640, 150)
     with torch.no_grad():
         out = model(tiles)
