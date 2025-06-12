@@ -26,7 +26,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_pred", action="store_true", help="If save_pred is set, prediction is saved in detections_exp")
     args = parser.parse_args()
 
-    random_img = not args.img
+    random_img = False
 
     model = YOLOV5s(first_out=first_out, nc=config.nc, anchors=config.ANCHORS,
                     ch=(first_out * 4, first_out * 8, first_out * 16)).to(config.DEVICE)
@@ -40,7 +40,7 @@ if __name__ == "__main__":
         img = np.array(cv2.imread(os.path.join(config.ROOT_DIR, "images", "test", random.choice(imgs)), cv2.IMREAD_UNCHANGED))
     else:
 
-        img = np.array(cv2.imread(os.path.join(config.ROOT_DIR, "images", "test", args.img), cv2.IMREAD_UNCHANGED))
+        img = np.array(cv2.imread(args.img, cv2.IMREAD_UNCHANGED))
 
     img = img.transpose((2, 0, 1))
     img = img[None, :]
