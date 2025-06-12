@@ -63,12 +63,12 @@ def save_checkpoint(state, folder_path, filename, epoch):
 
 
 def load_model_checkpoint(model_name, model, last_epoch):
-    folder = os.listdir(os.path.join("SAVED_CHECKPOINT", model_name))
+    # folder = os.listdir(os.path.join("SAVED_CHECKPOINT", model_name))
     
-    ckpt_name = f"checkpoint_epoch_{last_epoch}.pth.tar"
-    print(f"==> loading model weights stored in {ckpt_name} ")
+    # ckpt_name = f"checkpoint_epoch_{last_epoch}.pth.tar"
+    print(f"==> loading model weights stored in {model_name} ")
     
-    checkpoint = torch.load(os.path.join("SAVED_CHECKPOINT", model_name, ckpt_name), map_location=config.DEVICE)
+    checkpoint = torch.load(model_name, map_location=config.DEVICE)
     model.load_state_dict(checkpoint["state_dict"])
 
 

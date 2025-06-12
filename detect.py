@@ -32,7 +32,7 @@ if __name__ == "__main__":
                     ch=(first_out * 4, first_out * 8, first_out * 16)).to(config.DEVICE)
 
     path2model = os.path.join("SAVED_CHECKPOINT", args.model_name, args.checkpoint)
-    load_model_checkpoint(model=model, model_name=path2model, training=False)
+    load_model_checkpoint(model=model, model_name=path2model, last_epoch=100)
 
     config.ROOT_DIR = "/".join((config.ROOT_DIR.split("/")[:-1] + ["flir"]))
     imgs = os.listdir(os.path.join(config.ROOT_DIR, "images", "test"))
