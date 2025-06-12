@@ -60,7 +60,7 @@ def tile_image_tensor(img, tile_size, overlap, save_dir=None):
     tiles_np = tiles_np.transpose((0, 3, 1, 2))  # (N, C, H, W)
     tiles_np = tiles_np.astype(np.float32) / 255.0  # normalize
 
-    tiles_tensor = torch.from_numpy(tiles_np)
+    tiles_tensor = torch.from_numpy(tiles_np).to(config.DEVICE)
 
     return tiles_tensor, offsets
 
