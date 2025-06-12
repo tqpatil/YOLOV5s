@@ -80,8 +80,8 @@ def save_predictions(model, loader, folder, epoch, device, filename, num_images=
             with torch.no_grad():
                 out = model(images)
 
-            boxes = cells_to_bboxes(out, anchors, model.head.stride, is_pred=True, list_output=False)
-            gt_boxes = cells_to_bboxes(targets, anchors, model.head.stride, is_pred=False, list_output=False)
+            boxes = cells_to_bboxes(out, anchors, model.head.stride, is_pred=True, to_list=False)
+            gt_boxes = cells_to_bboxes(targets, anchors, model.head.stride, is_pred=False, to_list=False)
 
             # here using different nms_iou_thresh and config_thresh because of
             # https://github.com/ultralytics/yolov5/issues/4464
