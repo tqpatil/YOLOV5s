@@ -438,8 +438,8 @@ class Validation_Dataset(Dataset):
         targets = encode_yolo_targets(
             abs_labels_tensor,
             anchors=self.anchors,  # list of tensors [[num_anchors, 2], ...] normalized by stride
-            strides=self.strides,  # list of ints like [8,16,32]
-            num_classes=self.num_classes,
+            strides=self.S,  # list of ints like [8,16,32]
+            num_classes=config.nc,
             img_size=self.tile_size
         )
 
