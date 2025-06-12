@@ -50,33 +50,24 @@ class TiledTrainingDataset(Dataset):
             f for f in os.listdir(self.img_folder)
             if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp'))
         ])
-
         for img_name in image_files:
             img_path = os.path.join(self.img_folder, img_name)
             img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
             if img is None or img.ndim != 3 or img.shape[2] != 4:
-                continue
+                continue  # skip unreadable or non-4-channel images
 
             h, w, _ = img.shape
-
-            # Calculate necessary padding to fully cover image
-            pad_h = (self.tile_size - (h % (self.tile_size - self.overlap))) % (self.tile_size - self.overlap)
-            pad_w = (self.tile_size - (w % (self.tile_size - self.overlap))) % (self.tile_size - self.overlap)
-
-            padded_img = cv2.copyMakeBorder(img, 0, pad_h, 0, pad_w, cv2.BORDER_CONSTANT, value=0)
-            H, W, _ = padded_img.shape
-
-            for y in range(0, H - tile_size + 1, tile_size - overlap):
-                for x in range(0, W - tile_size + 1, tile_size - overlap):
-                    self.tiles_index.append((img_name, x, y, (h, w, pad_h, pad_w)))
-                    
+            for y in range(0, h - tile_size + 1, tile_size - overlap):
+                for x in range(0, w - tile_size + 1, tile_size - overlap):
+                    self.tiles_index.append((img_name, x, y))
         print(f"Total tiles generated: {len(self.tiles_index)}")
+
 
     def __len__(self):
         return len(self.tiles_index)
 
     def __getitem__(self, idx):
-        img_name, x_off, y_off, (orig_h, orig_w, pad_h, pad_w) = self.tiles_index[idx]
+        img_name, x_off, y_off = self.tiles_index[idx]
         img_path = os.path.join(self.img_folder, img_name)
         label_path = os.path.join(self.label_folder, img_name.rsplit(".", 1)[0] + ".txt")
 
@@ -85,13 +76,9 @@ class TiledTrainingDataset(Dataset):
         h, w, c = img.shape
         assert c == 4, "Expected 4-channel images"
 
-        # Pad full image again (needed since we're loading fresh image)
-        img = cv2.copyMakeBorder(img, 0, pad_h, 0, pad_w, cv2.BORDER_CONSTANT, value=0)
-
         tile = img[y_off:y_off + self.tile_size, x_off:x_off + self.tile_size]
         tile = np.ascontiguousarray(tile)
 
-        # Load and convert labels
         labels = []
         if os.path.exists(label_path):
             with warnings.catch_warnings():
@@ -109,20 +96,17 @@ class TiledTrainingDataset(Dataset):
             x2 = (x_c + w_box / 2) * w
             y2 = (y_c + h_box / 2) * h
 
-            # Account for padding offset
-            x1 = x1
-            y1 = y1
-            x2 = x2
-            y2 = y2
-
+            # Check if bbox intersects the tile
             if x2 <= x_off or x1 >= x_off + self.tile_size or y2 <= y_off or y1 >= y_off + self.tile_size:
                 continue
 
+            # Clip bbox to tile
             x1_tile = np.clip(x1 - x_off, 0, self.tile_size)
             y1_tile = np.clip(y1 - y_off, 0, self.tile_size)
             x2_tile = np.clip(x2 - x_off, 0, self.tile_size)
             y2_tile = np.clip(y2 - y_off, 0, self.tile_size)
 
+            # Convert to YOLO relative coords
             box_w = x2_tile - x1_tile
             box_h = y2_tile - y1_tile
             box_x = x1_tile + box_w / 2
@@ -135,17 +119,44 @@ class TiledTrainingDataset(Dataset):
 
         abs_labels = np.array(abs_labels)
 
-        # Apply transforms etc.
+        if abs_labels.shape[0] > 0:
+            class_labels = abs_labels[:, 0].astype(int).tolist()
+            bboxes = abs_labels[:, 1:].tolist()
+        else:
+            class_labels = []
+            bboxes = []
+
+        # Spatial transform
+        if self.spatial_transform and bboxes:
+            aug = self.spatial_transform(image=tile, bboxes=bboxes, class_labels=abs_labels[:, 0].astype(int).tolist())
+            tile = aug["image"]
+            bboxes = aug["bboxes"]
+            class_labels = aug["class_labels"]
+
+            abs_labels = []
+            for cls, bbox in zip(class_labels, bboxes):
+                abs_labels.append([cls] + list(bbox))
+            abs_labels = np.array(abs_labels)
+        else:
+            abs_labels = np.array([[cls] + list(bbox) for cls, bbox in zip(class_labels, bboxes)]) if bboxes else np.array([])
+
+        # Split channels for color transform
         rgb = tile[:, :, :3]
         alpha = tile[:, :, 3:]
 
+        # Color transform (apply only on rgb)
         if self.color_transform and abs_labels.shape[0] > 0:
             aug = self.color_transform(image=rgb, bboxes=abs_labels[:, 1:].tolist(), class_labels=abs_labels[:, 0].astype(int).tolist())
             rgb = aug["image"]
             bboxes = aug["bboxes"]
             class_labels = aug["class_labels"]
-            abs_labels = np.array([[cls] + list(bbox) for cls, bbox in zip(class_labels, bboxes)]) if bboxes else np.array([])
 
+            abs_labels = []
+            for cls, bbox in zip(class_labels, bboxes):
+                abs_labels.append([cls] + list(bbox))
+            abs_labels = np.array(abs_labels)
+
+        # Recombine channels
         tile = np.concatenate([rgb, alpha], axis=2) if alpha.shape[2] == 1 else rgb
         tile = tile.transpose((2, 0, 1))
         tile = np.ascontiguousarray(tile)
@@ -269,19 +280,19 @@ class Validation_Dataset(Dataset):
                  anchors,
                  root_directory,
                  transform=None,
-                 train=False,
+                 train=True,
                  S=(8, 16, 32),
                  rect_training=False,
                  default_size=640,
                  bs=64,
                  bboxes_format="yolo"):
-
+        
         assert bboxes_format == "yolo", "Only YOLO bbox format supported for tiling"
         assert not train, "This is a validation dataset, set train=False"
 
         self.anchors = anchors
         self.root_directory = root_directory
-        self.transform = transform  # color transform on RGB only
+        self.transform = transform  # only color transforms, applied to RGB only
         self.S = S
         self.rect_training = rect_training
         self.tile_size = default_size
@@ -299,7 +310,6 @@ class Validation_Dataset(Dataset):
             f for f in os.listdir(self.img_folder)
             if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp'))
         ])
-
         for img_name in image_files:
             img_path = os.path.join(self.img_folder, img_name)
             img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
@@ -307,19 +317,9 @@ class Validation_Dataset(Dataset):
                 continue
 
             h, w, _ = img.shape
-
-            # Calculate padding needed to cover the image fully in tiles
-            pad_h = (self.tile_size - (h % (self.tile_size - self.overlap))) % (self.tile_size - self.overlap)
-            pad_w = (self.tile_size - (w % (self.tile_size - self.overlap))) % (self.tile_size - self.overlap)
-
-            # Padded shape
-            H = h + pad_h
-            W = w + pad_w
-
-            # Generate tile coordinates over padded image
-            for y in range(0, H - self.tile_size + 1, self.tile_size - self.overlap):
-                for x in range(0, W - self.tile_size + 1, self.tile_size - self.overlap):
-                    self.tiles_index.append((img_name, x, y, (h, w, pad_h, pad_w)))
+            for y in range(0, h - self.tile_size + 1, self.tile_size - self.overlap):
+                for x in range(0, w - self.tile_size + 1, self.tile_size - self.overlap):
+                    self.tiles_index.append((img_name, x, y))
 
         print(f"Total validation tiles generated: {len(self.tiles_index)}")
 
@@ -327,17 +327,13 @@ class Validation_Dataset(Dataset):
         return len(self.tiles_index)
 
     def __getitem__(self, idx):
-        img_name, x_off, y_off, (orig_h, orig_w, pad_h, pad_w) = self.tiles_index[idx]
+        img_name, x_off, y_off = self.tiles_index[idx]
         img_path = os.path.join(self.img_folder, img_name)
         label_path = os.path.join(self.label_folder, img_name.rsplit(".", 1)[0] + ".txt")
 
         img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
-        assert img is not None, f"Image not found: {img_path}"
         h, w, c = img.shape
         assert c == 4, "Expected 4-channel images"
-
-        # Pad full image again (needed since loading fresh image)
-        img = cv2.copyMakeBorder(img, 0, pad_h, 0, pad_w, cv2.BORDER_CONSTANT, value=0)
 
         tile = img[y_off:y_off + self.tile_size, x_off:x_off + self.tile_size]
         tile = np.ascontiguousarray(tile)
@@ -359,7 +355,7 @@ class Validation_Dataset(Dataset):
             x2 = (x_c + w_box / 2) * w
             y2 = (y_c + h_box / 2) * h
 
-            # Check box outside tile
+            # Skip boxes outside the tile
             if x2 <= x_off or x1 >= x_off + self.tile_size or y2 <= y_off or y1 >= y_off + self.tile_size:
                 continue
 
@@ -386,10 +382,13 @@ class Validation_Dataset(Dataset):
 
         abs_labels = np.array(abs_labels)
 
-        # Color transform on RGB only
+        # --- Spatial Transform (none for val) ---
+
+        # Split channels for color transform
         rgb = tile[:, :, :3]
         alpha = tile[:, :, 3:]
 
+        # Apply optional color transform (on rgb only)
         if self.transform and abs_labels.shape[0] > 0:
             aug = self.transform(
                 image=rgb,
@@ -406,25 +405,25 @@ class Validation_Dataset(Dataset):
         tile = tile.transpose((2, 0, 1)).astype(np.float32)
         tile_tensor = torch.from_numpy(tile)
 
+        # Convert abs_labels to tensor
         if abs_labels.shape[0] > 0:
             abs_labels_tensor = torch.from_numpy(abs_labels).float()
         else:
             abs_labels_tensor = torch.zeros((0, 5), dtype=torch.float32)
-
         anchors_normalized = [
             torch.tensor(anchors, dtype=torch.float32) / stride
             for anchors, stride in zip(self.anchors, self.S)
         ]
 
+        # Now encode targets for all scales using encode_yolo_targets
         targets = encode_yolo_targets(
             abs_labels_tensor,
-            anchors=anchors_normalized,
-            strides=self.S,
+            anchors=anchors_normalized,  # list of tensors [[num_anchors, 2], ...] normalized by stride
+            strides=self.S,  # list of ints like [8,16,32]
             num_classes=config.nc,
             img_size=self.tile_size
         )
         targets = [torch.from_numpy(t).float() if isinstance(t, np.ndarray) else t for t in targets]
-
         return tile_tensor, targets
 
     @staticmethod
