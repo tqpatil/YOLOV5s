@@ -16,16 +16,21 @@ def cells_to_bboxes(predictions, anchors, strides, is_pred=False, to_list=True):
     for i in range(num_out_layers):
         bs, naxs, ny, nx, _ = predictions[i].shape
         stride = strides[i]
+
+        # generate grid + anchor grid
         grid[i], anchor_grid[i] = make_grids(anchors, naxs, ny=ny, nx=nx, stride=stride, i=i)
+
+        # move grid to same device as predictions
+        device = predictions[i].device
+        grid[i] = grid[i].to(device)
+        anchor_grid[i] = anchor_grid[i].to(device)
+
         if is_pred:
-            # formula here: https://github.com/ultralytics/yolov5/issues/471
-            #xy, wh, conf = predictions[i].sigmoid().split((2, 2, 80 + 1), 4)
             layer_prediction = predictions[i].sigmoid()
             obj = layer_prediction[..., 4:5]
             xy = (2 * (layer_prediction[..., 0:2]) + grid[i] - 0.5) * stride
-            wh = ((2*layer_prediction[..., 2:4])**2) * anchor_grid[i]
+            wh = ((2 * layer_prediction[..., 2:4]) ** 2) * anchor_grid[i]
             best_class = torch.argmax(layer_prediction[..., 5:], dim=-1).unsqueeze(-1)
-
         else:
             predictions[i] = predictions[i].to(config.DEVICE, non_blocking=True)
             obj = predictions[i][..., 4:5]
@@ -34,11 +39,9 @@ def cells_to_bboxes(predictions, anchors, strides, is_pred=False, to_list=True):
             best_class = predictions[i][..., 5:6]
 
         scale_bboxes = torch.cat((best_class, obj, xy, wh), dim=-1).reshape(bs, -1, 6)
-
         all_bboxes.append(scale_bboxes)
 
     return torch.cat(all_bboxes, dim=1).tolist() if to_list else torch.cat(all_bboxes, dim=1)
-
 def make_grids(anchors, naxs, stride, nx=20, ny=20, i=0):
 
     x_grid = torch.arange(nx)
