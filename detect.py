@@ -33,9 +33,9 @@ if __name__ == "__main__":
 
     path2model = os.path.join("SAVED_CHECKPOINT", args.model_name, args.checkpoint)
     load_model_checkpoint(model=model, model_name=path2model, last_epoch=100)
-
+    model.eval()
     config.ROOT_DIR = "/".join((config.ROOT_DIR.split("/")[:-1] + ["flir"]))
-    imgs = os.listdir(os.path.join(config.ROOT_DIR, "images", "test"))
+    # imgs = os.listdir(os.path.join(config.ROOT_DIR, "images", "test"))
     if random_img:
         img = np.array(cv2.imread(os.path.join(config.ROOT_DIR, "images", "test", random.choice(imgs)), cv2.IMREAD_UNCHANGED))
     else:
