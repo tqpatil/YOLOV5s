@@ -96,23 +96,12 @@ if __name__ == "__main__":
 
     
     tiles,_ = tile_image_tensor(img, 640, 150)
-    print(len(tiles))
-    with torch.no_grad():
-        out = model(tiles)
-    outputs = []
-    for i in range(len(out[0])):
-        bboxes = cells_to_bboxes([out[0][i]], model.head.anchors, model.head.stride, is_pred=True, to_list=False)
+    for i, tile in enumerate(tiles):
+        with torch.no_grad():
+            out = model(tile)
+        bboxes = cells_to_bboxes(out, model.head.anchors, model.head.stride, is_pred=True, to_list=False)
         bboxes = non_max_suppression(bboxes, iou_threshold=0.45, threshold=0.25, tolist=False)
-        outputs.append(bboxes)
-    print(len(outputs))
-    for i in range(len(tiles)):
-        tile = tiles[i]  # tensor shape: [C, H, W]
-        tile_np = tile[:3, :, :].permute(1, 2, 0).cpu().numpy()  # take only RGB and convert to (H, W, C)
-
-        # Optional: scale back to 0-255 if necessary
-        tile_np = (tile_np * 255).astype(np.uint8)  # only if model input was scaled to [0,1]
-
-        bboxes = outputs[i].cpu()  # (make sure it's on CPU)
-
+        tile_np = tile[:3, :, :].permute(1, 2, 0).cpu().numpy()  
         plot_image(tile_np, bboxes, config.labels)
+
 
